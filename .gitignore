@@ -1,0 +1,124 @@
+# ─────────────────────────────────────────
+#  PYTHON / DJANGO
+# ─────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+*.pyd
+
+# Ambiente virtual
+venv/
+.venv/
+env/
+.env/
+
+# Django
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+media/
+staticfiles/
+static_root/
+
+# Migrações geradas localmente (opcional — remova se quiser versionar)
+# */migrations/*.py
+# !*/migrations/__init__.py
+
+# Distribuição / build Python
+dist/
+build/
+*.egg-info/
+*.egg
+.eggs/
+
+# Pytest / coverage
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+
+# ─────────────────────────────────────────
+#  NODE / REACT + VITE
+# ─────────────────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+build/
+.vite/
+
+# Logs npm/yarn/pnpm
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Cache
+.npm/
+.yarn/
+.pnpm-store/
+*.tsbuildinfo
+
+# ─────────────────────────────────────────
+#  VARIÁVEIS DE AMBIENTE
+# ─────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─────────────────────────────────────────
+#  EDITORES / IDEs
+# ─────────────────────────────────────────
+# VSCode
+.vscode/
+!.vscode/extensions.json
+
+# JetBrains (PyCharm, WebStorm…)
+.idea/
+*.iml
+
+# Vim / Neovim
+*.swp
+*.swo
+Session.vim
+
+# Emacs
+*~
+\#*\#
+
+# ─────────────────────────────────────────
+#  SISTEMA OPERACIONAL
+# ─────────────────────────────────────────
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# Linux
+.directory
+
+# ─────────────────────────────────────────
+#  DOCKER (se usar futuramente)
+# ─────────────────────────────────────────
+*.env.docker
+docker-compose.override.yml
+
+# ─────────────────────────────────────────
+#  MISC
+# ─────────────────────────────────────────
+*.bak
+*.tmp
+*.orig
+.cache/
