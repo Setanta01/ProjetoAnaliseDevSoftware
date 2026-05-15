@@ -51,3 +51,173 @@ class Usuario(models.Model):
         """Verifica se a senha bate com o hash no banco"""
         from django.contrib.auth.hashers import check_password
         return check_password(raw_password, self.senha)
+
+class ConviteSistema(models.Model):
+    id = models.AutoField(primary_key=True)
+    email = models.CharField(max_length=150)
+    cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT, db_column='cargo_id')
+    token = models.CharField(max_length=255, unique=True)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='criado_por', related_name='convites_gerados')
+    usado = models.BooleanField(default=False)
+    expira_em = models.DateTimeField()
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'convites_sistema'
+
+
+class Projeto(models.Model):
+    id = models.AutoField(primary_key=True)
+    nome = models.CharField(max_length=150)
+    descricao = models.TextField(blank=True, null=True)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='criado_por')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'projetos'
+
+
+class ProjetoParticipante(models.Model):
+    id = models.AutoField(primary_key=True)
+    projeto = models.ForeignKey(Projeto, on_delete=models.CASCADE, db_column='projeto_id')
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='usuario_id')
+    convidado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='convidado_por', related_name='convidados_projeto')
+    entrou_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'projeto_participantes'
+        # O Django cria unique_together automaticamente para o PK composto se não tiver PK explícito,
+        # mas aqui temos o 'id' explícito. Vamos forçar a unicidade do par.
+        constraints = [
+            models.UniqueConstraint(fields=['projeto', 'usuario'], name='unique_projeto_usuario')
+        ]
+
+
+class Backlog(models.Model):
+    id = models.AutoField(primary_key=True)
+    projeto = models.OneToOneField(Projeto, on_delete=models.CASCADE, db_column='projeto_id', unique=True)
+    nome = models.CharField(max_length=100, default='Backlog Principal')
+
+    class Meta:
+        db_table = 'backlogs'
+
+
+class Sprint(models.Model):
+    class Status(models.TextChoices):
+        PLANEJADA = 'PLANEJADA', 'Planejada'
+        ATIVA = 'ATIVA', 'Ativa'
+        CONCLUIDA = 'CONCLUIDA', 'Concluída'
+
+    id = models.AutoField(primary_key=True)
+    projeto = models.ForeignKey(Projeto, on_delete=models.CASCADE, db_column='projeto_id')
+    nome = models.CharField(max_length=100)
+    data_inicio = models.DateField(null=True, blank=True)
+    data_fim = models.DateField(null=True, blank=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.PLANEJADA)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='criado_por')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sprints'
+
+
+class Task(models.Model):
+    class Status(models.TextChoices):
+        BACKLOG = 'BACKLOG', 'Backlog'
+        TODO = 'TODO', 'To Do'
+        EM_ANDAMENTO = 'EM_ANDAMENTO', 'Em Andamento'
+        REVISAO = 'REVISAO', 'Revisão'
+        CONCLUIDO = 'CONCLUIDO', 'Concluído'
+        BLOQUEADO = 'BLOQUEADO', 'Bloqueado'
+
+    class Prioridade(models.TextChoices):
+        BAIXA = 'BAIXA', 'Baixa'
+        MEDIA = 'MEDIA', 'Média'
+        ALTA = 'ALTA', 'Alta'
+        CRITICA = 'CRITICA', 'Crítica'
+
+    id = models.AutoField(primary_key=True)
+    projeto = models.ForeignKey(Projeto, on_delete=models.CASCADE, db_column='projeto_id')
+    backlog = models.ForeignKey(Backlog, on_delete=models.CASCADE, db_column='backlog_id')
+    sprint = models.ForeignKey(Sprint, on_delete=models.SET_NULL, null=True, blank=True, db_column='sprint_id')
+    titulo = models.CharField(max_length=150)
+    descricao = models.TextField(blank=True, null=True)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.BACKLOG)
+    prioridade = models.CharField(max_length=20, choices=Prioridade.choices, default=Prioridade.MEDIA)
+    posicao = models.IntegerField(default=0)
+    criado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='criado_por', related_name='tasks_criadas')
+    responsavel = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column='responsavel_id', related_name='tasks_responsavel')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'tasks'
+
+
+class Subtask(models.Model):
+    class Status(models.TextChoices):
+        TODO = 'TODO', 'To Do'
+        EM_ANDAMENTO = 'EM_ANDAMENTO', 'Em Andamento'
+        CONCLUIDO = 'CONCLUIDO', 'Concluído'
+
+    id = models.AutoField(primary_key=True)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, db_column='task_id')
+    titulo = models.CharField(max_length=150)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.TODO)
+    posicao = models.IntegerField(default=0)
+    responsavel = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column='responsavel_id')
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'subtasks'
+
+
+class Comentario(models.Model):
+    id = models.AutoField(primary_key=True)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, db_column='task_id')
+    usuario = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='usuario_id')
+    texto = models.TextField()
+    editado_em = models.DateTimeField(null=True, blank=True)
+    criado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'comentarios'
+
+
+class TaskHistorico(models.Model):
+    # Enums copiados da Task para referência
+    class StatusChoices(models.TextChoices):
+        BACKLOG = 'BACKLOG', 'Backlog'
+        TODO = 'TODO', 'To Do'
+        EM_ANDAMENTO = 'EM_ANDAMENTO', 'Em Andamento'
+        REVISAO = 'REVISAO', 'Revisão'
+        CONCLUIDO = 'CONCLUIDO', 'Concluído'
+        BLOQUEADO = 'BLOQUEADO', 'Bloqueado'
+
+    id = models.AutoField(primary_key=True)
+    task = models.ForeignKey(Task, on_delete=models.CASCADE, db_column='task_id')
+    usuario = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='usuario_id')
+    status_anterior = models.CharField(max_length=20, choices=StatusChoices.choices, null=True, blank=True)
+    status_novo = models.CharField(max_length=20, choices=StatusChoices.choices)
+    alterado_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'task_historico'
+
+
+class Notificacao(models.Model):
+    class Tipo(models.TextChoices):
+        ATRIBUICAO = 'ATRIBUICAO', 'Atribuição'
+        COMENTARIO = 'COMENTARIO', 'Comentário'
+        SPRINT = 'SPRINT', 'Sprint'
+
+    id = models.AutoField(primary_key=True)
+    usuario = models.ForeignKey(Usuario, on_delete=models.CASCADE, db_column='usuario_id')
+    tipo = models.CharField(max_length=20, choices=Tipo.choices)
+    mensagem = models.TextField()
+    lida = models.BooleanField(default=False)
+    criado_em = models.DateTimeField(auto_now_add=True)
+    task = models.ForeignKey(Task, on_delete=models.SET_NULL, null=True, blank=True, db_column='task_id')
+    sprint = models.ForeignKey(Sprint, on_delete=models.SET_NULL, null=True, blank=True, db_column='sprint_id')
+
+    class Meta:
+        db_table = 'notificacoes'    
