@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import api from './api'
 import './App.css'
+import DashboardRouter from './dashboards/DashboardRouter'
 
 type View = 'login' | 'register' | 'profile'
 
@@ -8,13 +9,14 @@ interface UserProfile {
   id: number
   username: string
   email: string
+  cargo: string
 }
 
 function App() {
   const [view, setView] = useState<View>('login')
-  const [username, setUsername] = useState('')
+  const [username, setUsername] = useState('') // Usado para Email no Login e Nome no Registro
   const [password, setPassword] = useState('')
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState('')      // Usado para Email no Registro
   const [error, setError] = useState('')
   const [profile, setProfile] = useState<UserProfile | null>(null)
 
@@ -36,24 +38,97 @@ function App() {
 
   const handleLogin = async () => {
     setError('')
+    
+    // Log para ver o que estamos enviando para o login
+    console.log("Tentando login com:", { email: username, password })
+
     try {
-      const res = await api.post('http://localhost:8000/api/token/', { username, password })
+      const res = await api.post('http://localhost:8000/api/token/', { 
+        email: username, 
+        password 
+      })
+      
+      // Sucesso
+      console.log("Login bem sucedido:", res.data)
       localStorage.setItem('access_token', res.data.access)
       localStorage.setItem('refresh_token', res.data.refresh)
       await fetchProfile()
-    } catch {
-      setError('Usuário ou senha inválidos.')
+      
+    } catch (err: any) {
+      console.error("Erro completo no login:", err)
+
+      let mensagemErro = 'Usuário ou senha inválidos.'
+
+      if (err.response) {
+        console.log("Dados da resposta do erro (Login):", err.response.data)
+        
+        if (err.response.data.detail) {
+          mensagemErro = err.response.data.detail
+        } else if (err.response.data.error) {
+          mensagemErro = err.response.data.error
+        } else if (typeof err.response.data === 'string') {
+          mensagemErro = err.response.data
+        } else {
+          mensagemErro = JSON.stringify(err.response.data)
+        }
+      } else if (err.request) {
+        mensagemErro = 'Sem resposta do servidor. Verifique a conexão.'
+      } else {
+        mensagemErro = err.message
+      }
+
+      setError(mensagemErro)
     }
   }
 
   const handleRegister = async () => {
     setError('')
+    
+    // Log para ver o que estamos enviando
+    console.log("Tentando registrar com:", { nome: username, email, password, cargo: 'DEV' })
+
     try {
-      await api.post('register/', { username, password, email })
+      const res = await api.post('register/', { 
+        nome: username,     
+        email: email,       
+        password: password,
+        cargo: 'DEV'        
+      })
+      
+      // Sucesso
+      console.log("Registro bem sucedido:", res.data)
       setView('login')
       setError('Conta criada! Faça login.')
+      
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Erro ao registrar.')
+      console.error("Erro completo no registro:", err)
+
+      // Tenta pegar a mensagem específica do backend (campo 'error' ou detalhes do validation error)
+      let mensagemErro = 'Erro ao registrar.'
+
+      if (err.response) {
+        // Se o servidor respondeu, mas com erro (400, 500, etc)
+        console.log("Dados da resposta do erro:", err.response.data)
+        
+        if (err.response.data.error) {
+          mensagemErro = err.response.data.error
+        } else if (err.response.data.detail) {
+          mensagemErro = err.response.data.detail
+        } else if (typeof err.response.data === 'string') {
+          mensagemErro = err.response.data
+        } else {
+          // Se for um dicionário com vários erros (ex: email: ['Este campo é obrigatório'])
+          mensagemErro = JSON.stringify(err.response.data)
+        }
+      } else if (err.request) {
+        // Se a requisição foi feita mas não houve resposta (servidor caiu, network error)
+        mensagemErro = 'Sem resposta do servidor. Verifique a conexão.'
+      } else {
+        // Erro ao montar a requisição
+        mensagemErro = err.message
+      }
+
+      setError(mensagemErro)
     }
   }
 
@@ -64,18 +139,20 @@ function App() {
     setView('login')
     setUsername('')
     setPassword('')
+    setEmail('')
   }
 
   if (view === 'profile' && profile) {
-    return (
+  return (
+    <>
+      <DashboardRouter cargo={profile.cargo} />
+
       <section id="center">
-        <h1>Bem-vindo, {profile.username}! 👋</h1>
-        <p>Email: {profile.email || '(não informado)'}</p>
-        <p>ID: {profile.id}</p>
         <button onClick={handleLogout}>Sair</button>
       </section>
-    )
-  }
+    </>
+  )
+}
 
   return (
     <section id="center">
@@ -83,15 +160,17 @@ function App() {
 
       {error && <p style={{ color: 'salmon' }}>{error}</p>}
 
+      {/* No Login: Este campo serve como Email. No Registro: serve como Nome. */}
       <input
-        placeholder="Username"
+        placeholder={view === 'login' ? "Email" : "Nome Completo"}
         value={username}
         onChange={e => setUsername(e.target.value)}
       />
 
+      {/* No Registro: pedimos o email separadamente */}
       {view === 'register' && (
         <input
-          placeholder="Email (opcional)"
+          placeholder="Email"
           value={email}
           onChange={e => setEmail(e.target.value)}
         />

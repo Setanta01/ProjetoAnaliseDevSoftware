@@ -1,13 +1,15 @@
+# backend/backend/urls.py
 from django.contrib import admin
 from django.urls import path, include
-from rest_framework_simplejwt.views import (
-    TokenObtainPairView,
-    TokenRefreshView,
-)
+
+# Removemos as importações do TokenObtainPairView porque não usamos mais aqui
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+    
+    # REMOVIDO: path('api/token/', ...) - Isso causava o conflito
+    # REMOVIDO: path('api/token/refresh/', ...) - Isso causava o conflito
+    
+    # Inclui todas as rotas da API (onde está o login customizado e o refresh)
     path('api/', include('api.urls')),
 ]
