@@ -1,121 +1,131 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
+import { useState, useEffect } from 'react'
+import api from './api'
 import './App.css'
 
+type View = 'login' | 'register' | 'profile'
+
+interface UserProfile {
+  id: number
+  username: string
+  email: string
+}
+
 function App() {
-  const [count, setCount] = useState(0)
+  const [view, setView] = useState<View>('login')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState('')
+  const [error, setError] = useState('')
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+
+  useEffect(() => {
+    const token = localStorage.getItem('access_token')
+    if (token) fetchProfile()
+  }, [])
+
+  const fetchProfile = async () => {
+    try {
+      const res = await api.get('profile/')
+      setProfile(res.data)
+      setView('profile')
+    } catch {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+    }
+  }
+
+  const handleLogin = async () => {
+    setError('')
+    try {
+      const res = await api.post('http://localhost:8000/api/token/', { username, password })
+      localStorage.setItem('access_token', res.data.access)
+      localStorage.setItem('refresh_token', res.data.refresh)
+      await fetchProfile()
+    } catch {
+      setError('Usuário ou senha inválidos.')
+    }
+  }
+
+  const handleRegister = async () => {
+    setError('')
+    try {
+      await api.post('register/', { username, password, email })
+      setView('login')
+      setError('Conta criada! Faça login.')
+    } catch (err: any) {
+      setError(err.response?.data?.error || 'Erro ao registrar.')
+    }
+  }
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    setProfile(null)
+    setView('login')
+    setUsername('')
+    setPassword('')
+  }
+
+  if (view === 'profile' && profile) {
+    return (
+      <section id="center">
+        <h1>Bem-vindo, {profile.username}! 👋</h1>
+        <p>Email: {profile.email || '(não informado)'}</p>
+        <p>ID: {profile.id}</p>
+        <button onClick={handleLogout}>Sair</button>
+      </section>
+    )
+  }
 
   return (
-    <>
-      <section id="center">
-        <div className="hero">
-          <img src={heroImg} className="base" width="170" height="179" alt="" />
-          <img src={reactLogo} className="framework" alt="React logo" />
-          <img src={viteLogo} className="vite" alt="Vite logo" />
-        </div>
-        <div>
-          <h1>Get started</h1>
+    <section id="center">
+      <h1>{view === 'login' ? 'Login' : 'Cadastro'}</h1>
+
+      {error && <p style={{ color: 'salmon' }}>{error}</p>}
+
+      <input
+        placeholder="Username"
+        value={username}
+        onChange={e => setUsername(e.target.value)}
+      />
+
+      {view === 'register' && (
+        <input
+          placeholder="Email (opcional)"
+          value={email}
+          onChange={e => setEmail(e.target.value)}
+        />
+      )}
+
+      <input
+        placeholder="Senha"
+        type="password"
+        value={password}
+        onChange={e => setPassword(e.target.value)}
+      />
+
+      {view === 'login' ? (
+        <>
+          <button onClick={handleLogin}>Entrar</button>
           <p>
-            Edit <code>src/App.tsx</code> and save to test <code>HMR</code>
+            Não tem conta?{' '}
+            <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setView('register'); setError('') }}>
+              Cadastre-se
+            </span>
           </p>
-        </div>
-        <button
-          type="button"
-          className="counter"
-          onClick={() => setCount((count) => count + 1)}
-        >
-          Count is {count}
-        </button>
-      </section>
-
-      <div className="ticks"></div>
-
-      <section id="next-steps">
-        <div id="docs">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#documentation-icon"></use>
-          </svg>
-          <h2>Documentation</h2>
-          <p>Your questions, answered</p>
-          <ul>
-            <li>
-              <a href="https://vite.dev/" target="_blank">
-                <img className="logo" src={viteLogo} alt="" />
-                Explore Vite
-              </a>
-            </li>
-            <li>
-              <a href="https://react.dev/" target="_blank">
-                <img className="button-icon" src={reactLogo} alt="" />
-                Learn more
-              </a>
-            </li>
-          </ul>
-        </div>
-        <div id="social">
-          <svg className="icon" role="presentation" aria-hidden="true">
-            <use href="/icons.svg#social-icon"></use>
-          </svg>
-          <h2>Connect with us</h2>
-          <p>Join the Vite community</p>
-          <ul>
-            <li>
-              <a href="https://github.com/vitejs/vite" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#github-icon"></use>
-                </svg>
-                GitHub
-              </a>
-            </li>
-            <li>
-              <a href="https://chat.vite.dev/" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#discord-icon"></use>
-                </svg>
-                Discord
-              </a>
-            </li>
-            <li>
-              <a href="https://x.com/vite_js" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#x-icon"></use>
-                </svg>
-                X.com
-              </a>
-            </li>
-            <li>
-              <a href="https://bsky.app/profile/vite.dev" target="_blank">
-                <svg
-                  className="button-icon"
-                  role="presentation"
-                  aria-hidden="true"
-                >
-                  <use href="/icons.svg#bluesky-icon"></use>
-                </svg>
-                Bluesky
-              </a>
-            </li>
-          </ul>
-        </div>
-      </section>
-
-      <div className="ticks"></div>
-      <section id="spacer"></section>
-    </>
+        </>
+      ) : (
+        <>
+          <button onClick={handleRegister}>Criar conta</button>
+          <p>
+            Já tem conta?{' '}
+            <span style={{ cursor: 'pointer', textDecoration: 'underline' }} onClick={() => { setView('login'); setError('') }}>
+              Fazer login
+            </span>
+          </p>
+        </>
+      )}
+    </section>
   )
 }
 
