@@ -1,3 +1,4 @@
+# backend/requirements.txt
 asgiref==3.11.1
 Django==5.2.14
 django-cors-headers==4.9.0
@@ -8,3 +9,12 @@ PyJWT==2.12.1
 python-dotenv==1.2.2
 sqlparse==0.5.5
 typing_extensions==4.15.0
+ 
+# ── MFA ───────────────────────────────────
+pyotp==2.9.0          # TOTP / HOTP (Google Authenticator)
+qrcode[pil]==8.0      # Geração de QR code PNG
+Pillow==11.2.1        # Dependência do qrcode[pil]
+ 
+# ── Google OAuth ──────────────────────────
+requests==2.32.3      # Chamada HTTP para tokeninfo do Google
+ 

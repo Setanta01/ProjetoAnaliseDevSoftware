@@ -5,18 +5,25 @@ backend/api/__pycache__/admin.cpython-310.pyc
 backend/api/__pycache__/apps.cpython-310.pyc
 backend/api/__pycache__/authentication.cpython-310.pyc
 backend/api/__pycache__/backends.cpython-310.pyc
+backend/api/__pycache__/mfa_utils.cpython-310.pyc
 backend/api/__pycache__/models.cpython-310.pyc
 backend/api/__pycache__/serializers.cpython-310.pyc
 backend/api/__pycache__/urls.cpython-310.pyc
 backend/api/__pycache__/views.cpython-310.pyc
+backend/api/__pycache__/views_mfa.cpython-310.pyc
 backend/api/admin.py
 backend/api/apps.py
 backend/api/authentication.py
 backend/api/backends.py
+backend/api/mfa_utils.py
 backend/api/migrations/0002_initial_schema.py
+backend/api/migrations/0003_add_task_fields.py
+backend/api/migrations/0004_add_mfa_fields.py
 backend/api/migrations/__init__.py
 backend/api/migrations/__pycache__/0001_initial_load_from_sql.cpython-310.pyc
 backend/api/migrations/__pycache__/0002_initial_schema.cpython-310.pyc
+backend/api/migrations/__pycache__/0003_add_task_fields.cpython-310.pyc
+backend/api/migrations/__pycache__/0004_add_mfa_fields.cpython-310.pyc
 backend/api/migrations/__pycache__/__init__.cpython-310.pyc
 backend/api/migrations/sql/initial_schema.sql
 backend/api/models.py
@@ -24,6 +31,7 @@ backend/api/serializers.py
 backend/api/tests.py
 backend/api/urls.py
 backend/api/views.py
+backend/api/views_mfa.py
 backend/backend/__init__.py
 backend/backend/__pycache__/__init__.cpython-310.pyc
 backend/backend/__pycache__/settings.cpython-310.pyc
@@ -44,12 +52,15 @@ frontend/src/api.ts
 frontend/src/assets/hero.png
 frontend/src/assets/react.svg
 frontend/src/assets/vite.svg
+frontend/src/auth/MfaChallenge.tsx
+frontend/src/auth/MfaSettingsModal.tsx
 frontend/src/components/ui.tsx
 frontend/src/dashboards/Admindashboard.tsx
 frontend/src/dashboards/DashboardRouter.tsx
 frontend/src/dashboards/Devdashboard.tsx
 frontend/src/dashboards/Gerentedashboard.tsx
 frontend/src/dashboards/Qadashboard.tsx
+frontend/src/hooks/useMFA.ts
 frontend/src/index.css
 frontend/src/main.tsx
 frontend/src/modals/CardDetailModal.tsx
@@ -74,6 +85,7 @@ frontend/src/views/SprintHistoryView.tsx
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-oauth/google": "^0.13.5",
     "axios": "^1.16.1",
     "lucide-react": "^1.16.0",
     "react": "^19.2.6",
@@ -309,778 +321,367 @@ function App() {
 
 export default App
 ----- frontend/src/Dashboard.tsx -----
-import { useState, useEffect } from "react";
-import type { CSSProperties, ReactNode } from "react";
+// frontend/src/Dashboard.tsx
+// Versão atualizada com:
+//   - Botão "Entrar com Google" (usando @react-oauth/google)
+//   - Fluxo MFA Challenge quando o backend retorna mfa_required: true
+//   - Botão de configurações MFA no sidebar
 
-const API_BASE = "http://localhost:8000/api";
+import { useState, useEffect } from 'react'
+import type { CSSProperties } from 'react'
+import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google'
 
-// ─── TIPOS ────────────────────────────────────────────────────────────────────
+import MfaChallenge from './auth/MfaChallenge'
+import MfaSettingsModal from './auth/MfaSettingsModal'
+import type { MfaTipo } from './hooks/useMFA'
+
+// ─── Importe os dashboards existentes ────────────────────────────────────────
+import DashboardRouter from './dashboards/DashboardRouter'
+
+// ─── Configuração ─────────────────────────────────────────────────────────────
+const API_BASE         = 'http://localhost:8000/api'
+// Substitua pelo seu Client ID do Google Cloud Console
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
+
+// ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface UserProfile {
-  id: number;
-  username: string;
-  email: string;
-  cargo: Cargo;
+  id: number
+  username: string
+  email: string
+  cargo: string
+  mfa_ativo: boolean
+  mfa_tipo: MfaTipo | null
+  tem_google: boolean
 }
 
-interface Projeto {
-  id: number;
-  nome: string;
-  descricao?: string;
-  criado_em?: string;
+type AppView = 'login' | 'dashboard'
+
+interface MfaPending {
+  mfa_token: string
+  mfa_tipo: MfaTipo
 }
 
-interface Sprint {
-  id: number;
-  nome: string;
-  status: "PLANEJADA" | "ATIVA" | "CONCLUIDA";
-  projeto_id: number;
-  total_tasks?: number;
-  concluidas?: number;
-  progresso?: number;
-  data_inicio?: string;
-  data_fim?: string;
-}
+// ─── API helper ───────────────────────────────────────────────────────────────
 
-interface Task {
-  id: number;
-  titulo: string;
-  descricao?: string;
-  status: TaskStatus;
-  prioridade: Prioridade;
-  responsavel_id?: number;
-  responsavel_nome?: string;
-  sprint_id?: number;
-  projeto_id?: number;
-  criado_em?: string;
-}
-
-interface Usuario {
-  id: number;
-  nome: string;
-  email: string;
-  cargo: Cargo;
-  ativo: boolean;
-  criado_em?: string;
-}
-
-interface AdminStats {
-  total_usuarios: number;
-  total_projetos: number;
-  sprints_ativas: number;
-  convites_pendentes: number;
-}
-
-type Cargo = "ADMIN" | "GERENTE" | "DEV" | "QA";
-type TaskStatus = "BACKLOG" | "TODO" | "EM_ANDAMENTO" | "REVISAO" | "CONCLUIDO" | "BLOQUEADO";
-type Prioridade = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
-type FeedbackStatus = "aprovando" | "aprovado" | "reprovando" | "reprovado" | "erro";
-
-// ─── API HELPER ───────────────────────────────────────────────────────────────
-
-function apiFetch(endpoint: string, options: RequestInit = {}): Promise<any> {
-  const token = localStorage.getItem("access_token");
-  return fetch(`${API_BASE}${endpoint}`, {
+async function apiFetch(endpoint: string, options: RequestInit = {}) {
+  const token = localStorage.getItem('access_token')
+  const res = await fetch(`${API_BASE}${endpoint}`, {
     ...options,
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
       ...(options.headers as Record<string, string> ?? {}),
     },
-  }).then(async (res) => {
-    if (!res.ok) throw await res.json();
-    return res.json();
-  });
+  })
+  if (!res.ok) throw await res.json()
+  return res.json()
 }
 
-// ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-function getInitials(name: string): string {
-  return name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
-}
-
-const CARGO_COLOR: Record<Cargo, { bg: string; text: string }> = {
-  ADMIN:   { bg: "#EDE9FE", text: "#5B21B6" },
-  GERENTE: { bg: "#DBEAFE", text: "#1D4ED8" },
-  DEV:     { bg: "#D1FAE5", text: "#065F46" },
-  QA:      { bg: "#FEF3C7", text: "#92400E" },
-};
-
-const STATUS_COLOR: Record<TaskStatus, { bg: string; text: string }> = {
-  BACKLOG:      { bg: "#F3F4F6", text: "#374151" },
-  TODO:         { bg: "#DBEAFE", text: "#1E40AF" },
-  EM_ANDAMENTO: { bg: "#FEF3C7", text: "#92400E" },
-  REVISAO:      { bg: "#EDE9FE", text: "#5B21B6" },
-  CONCLUIDO:    { bg: "#D1FAE5", text: "#065F46" },
-  BLOQUEADO:    { bg: "#FEE2E2", text: "#991B1B" },
-};
-
-const PRIORIDADE_COLOR: Record<Prioridade, { bg: string; text: string }> = {
-  BAIXA:   { bg: "#D1FAE5", text: "#065F46" },
-  MEDIA:   { bg: "#DBEAFE", text: "#1E40AF" },
-  ALTA:    { bg: "#FEF3C7", text: "#92400E" },
-  CRITICA: { bg: "#FEE2E2", text: "#991B1B" },
-};
-
-// ─── COMPONENTES BASE ─────────────────────────────────────────────────────────
-
-interface BadgeProps {
-  label: string;
-  colors?: { bg: string; text: string };
-  size?: "sm" | "md";
-}
-
-function Badge({ label, colors, size = "sm" }: BadgeProps) {
-  const style: CSSProperties = {
-    display: "inline-flex",
-    alignItems: "center",
-    padding: size === "sm" ? "2px 8px" : "4px 12px",
-    borderRadius: 20,
-    fontSize: size === "sm" ? 11 : 12,
-    fontWeight: 600,
-    background: colors?.bg ?? "#F3F4F6",
-    color: colors?.text ?? "#374151",
-    letterSpacing: 0.3,
-  };
-  return <span style={style}>{label}</span>;
-}
-
-interface StatCardProps {
-  icon: string;
-  value: number | string;
-  label: string;
-  accent: string;
-}
-
-function StatCard({ icon, value, label, accent }: StatCardProps) {
-  return (
-    <div style={{
-      background: "#fff",
-      border: "1px solid #E5E7EB",
-      borderRadius: 14,
-      padding: "1.25rem",
-      display: "flex",
-      flexDirection: "column",
-      gap: 4,
-      borderTop: `3px solid ${accent}`,
-    }}>
-      <span style={{ fontSize: 22 }}>{icon}</span>
-      <span style={{ fontSize: 28, fontWeight: 700, color: "#111827", lineHeight: 1.1 }}>{value}</span>
-      <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>{label}</span>
-    </div>
-  );
-}
-
-function TaskRow({ task }: { task: Task }) {
-  return (
-    <div style={{
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "12px 0",
-      borderBottom: "1px solid #F3F4F6",
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontWeight: 500, fontSize: 14, color: "#111827", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {task.titulo}
-        </div>
-        {task.responsavel_nome && (
-          <div style={{ fontSize: 12, color: "#9CA3AF" }}>{task.responsavel_nome}</div>
-        )}
-      </div>
-      <div style={{ display: "flex", gap: 6, marginLeft: 12, flexShrink: 0 }}>
-        <Badge label={task.prioridade} colors={PRIORIDADE_COLOR[task.prioridade]} />
-        <Badge label={task.status.replace("_", " ")} colors={STATUS_COLOR[task.status]} />
-      </div>
-    </div>
-  );
-}
-
-function SprintProgress({ sprint }: { sprint: Sprint }) {
-  const pct = sprint.progresso ?? 0;
-  return (
-    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "1rem 1.25rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <span style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{sprint.nome}</span>
-        <Badge
-          label={sprint.status}
-          colors={sprint.status === "ATIVA" ? { bg: "#D1FAE5", text: "#065F46" } : { bg: "#F3F4F6", text: "#374151" }}
-        />
-      </div>
-      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8 }}>{sprint.total_tasks ?? "—"} tasks</div>
-      <div style={{ background: "#F3F4F6", borderRadius: 99, height: 6 }}>
-        <div style={{ background: "#3B82F6", borderRadius: 99, height: 6, width: `${pct}%`, transition: "width 0.6s ease" }} />
-      </div>
-      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{Math.round(pct)}% concluído</div>
-    </div>
-  );
-}
-
-function Avatar({ name, size = 36 }: { name: string; size?: number }) {
-  const initials = getInitials(name);
-  const bgColors = ["#BFDBFE", "#A7F3D0", "#FDE68A", "#FBCFE8", "#DDD6FE"];
-  const textColors = ["#1E40AF", "#065F46", "#92400E", "#9D174D", "#5B21B6"];
-  const idx = (name.charCodeAt(0) || 0) % bgColors.length;
-  return (
-    <div style={{
-      width: size, height: size, borderRadius: "50%",
-      background: bgColors[idx], color: textColors[idx],
-      display: "flex", alignItems: "center", justifyContent: "center",
-      fontSize: size * 0.35, fontWeight: 700, flexShrink: 0,
-    }}>{initials}</div>
-  );
-}
-
-interface SectionCardProps {
-  title: string;
-  children: ReactNode;
-  action?: ReactNode;
-}
-
-function SectionCard({ title, children, action }: SectionCardProps) {
-  return (
-    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E5E7EB", padding: "1.25rem", marginBottom: 16 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
-        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#111827" }}>{title}</h2>
-        {action}
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function EmptyState({ message }: { message: string }) {
-  return (
-    <div style={{ textAlign: "center", padding: "2rem", color: "#9CA3AF", fontSize: 13 }}>
-      {message}
-    </div>
-  );
-}
-
-function LoadingSpinner() {
-  return (
-    <div style={{ display: "flex", justifyContent: "center", padding: "2rem" }}>
-      <div style={{
-        width: 32, height: 32,
-        border: "3px solid #E5E7EB",
-        borderTop: "3px solid #3B82F6",
-        borderRadius: "50%",
-        animation: "spin 0.8s linear infinite",
-      }} />
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-    </div>
-  );
-}
-
-// ─── DASHBOARDS POR CARGO ─────────────────────────────────────────────────────
-
-function AdminDashboard({ profile }: { profile: UserProfile }) {
-  const [stats, setStats] = useState<AdminStats | null>(null);
-  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
-  const [projetos, setProjetos] = useState<Projeto[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.allSettled([
-      apiFetch("/admin/stats/"),
-      apiFetch("/admin/usuarios/"),
-      apiFetch("/projetos/"),
-    ]).then(([s, u, p]) => {
-      if (s.status === "fulfilled") setStats(s.value as AdminStats);
-      if (u.status === "fulfilled") setUsuarios(u.value as Usuario[]);
-      if (p.status === "fulfilled") setProjetos(p.value as Projeto[]);
-      setLoading(false);
-    });
-  }, []);
-
-  if (loading) return <LoadingSpinner />;
-
-  return (
-    <div>
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Painel Admin</h1>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Visão geral do sistema</p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <StatCard icon="👥" value={stats?.total_usuarios ?? usuarios.length} label="Usuários ativos" accent="#3B82F6" />
-        <StatCard icon="📁" value={stats?.total_projetos ?? projetos.length} label="Projetos" accent="#10B981" />
-        <StatCard icon="✉️" value={stats?.convites_pendentes ?? "—"} label="Convites pendentes" accent="#F59E0B" />
-        <StatCard icon="🏃" value={stats?.sprints_ativas ?? "—"} label="Sprints ativas" accent="#8B5CF6" />
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
-        <SectionCard title="Usuários recentes">
-          {usuarios.length === 0
-            ? <EmptyState message="Nenhum usuário encontrado" />
-            : usuarios.slice(0, 5).map((u) => (
-              <div key={u.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <Avatar name={u.nome} />
-                  <div>
-                    <div style={{ fontWeight: 500, fontSize: 14 }}>{u.nome}</div>
-                    <Badge label={u.cargo} colors={CARGO_COLOR[u.cargo] ?? CARGO_COLOR.DEV} />
-                  </div>
-                </div>
-                <span style={{ fontSize: 12, fontWeight: 500, color: u.ativo ? "#10B981" : "#EF4444" }}>
-                  {u.ativo ? "Ativo" : "Inativo"}
-                </span>
-              </div>
-            ))
-          }
-        </SectionCard>
-
-        <SectionCard title="Ações rápidas">
-          {(["Gerar convite", "Criar projeto", "Ver relatórios", "Gerenciar cargos"] as const).map((a) => (
-            <button key={a} style={{
-              display: "block", width: "100%", textAlign: "left",
-              background: "none", border: "1px solid #E5E7EB", borderRadius: 8,
-              padding: "10px 14px", marginBottom: 8, cursor: "pointer",
-              fontSize: 14, fontWeight: 500, color: "#374151",
-            }}>
-              {a} →
-            </button>
-          ))}
-        </SectionCard>
-      </div>
-
-      {projetos.length > 0 && (
-        <SectionCard title="Projetos do sistema">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
-            {projetos.map((p) => (
-              <div key={p.id} style={{ padding: "12px 14px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB" }}>
-                <div style={{ fontWeight: 600, fontSize: 14, color: "#111827", marginBottom: 4 }}>{p.nome}</div>
-                {p.descricao && <div style={{ fontSize: 12, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.descricao}</div>}
-              </div>
-            ))}
-          </div>
-        </SectionCard>
-      )}
-    </div>
-  );
-}
-
-function GerenteDashboard({ profile }: { profile: UserProfile }) {
-  const [projetos, setProjetos] = useState<Projeto[]>([]);
-  const [sprints, setSprints] = useState<Sprint[]>([]);
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    Promise.allSettled([
-      apiFetch("/projetos/"),
-      apiFetch("/sprints/"),
-      apiFetch("/tasks/"),
-    ]).then(([p, s, t]) => {
-      if (p.status === "fulfilled") setProjetos(p.value as Projeto[]);
-      if (s.status === "fulfilled") setSprints(s.value as Sprint[]);
-      if (t.status === "fulfilled") setTasks(t.value as Task[]);
-      setLoading(false);
-    });
-  }, []);
-
-  if (loading) return <LoadingSpinner />;
-
-  const sprintsAtivas = sprints.filter((s) => s.status === "ATIVA" || s.status === "PLANEJADA");
-  const tasksEquipe = tasks.filter((t) => t.status !== "BACKLOG").slice(0, 8);
-
-  return (
-    <div>
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Painel Gerente</h1>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Acompanhamento de sprints e equipe</p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <StatCard icon="📁" value={projetos.length} label="Projetos" accent="#3B82F6" />
-        <StatCard icon="🏃" value={sprints.filter((s) => s.status === "ATIVA").length} label="Sprints ativas" accent="#10B981" />
-        <StatCard icon="📋" value={tasks.length} label="Total tasks" accent="#F59E0B" />
-        <StatCard icon="✅" value={tasks.filter((t) => t.status === "CONCLUIDO").length} label="Concluídas" accent="#8B5CF6" />
-      </div>
-
-      {sprintsAtivas.length > 0 && (
-        <SectionCard title="Sprints">
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
-            {sprintsAtivas.map((s) => <SprintProgress key={s.id} sprint={s} />)}
-          </div>
-        </SectionCard>
-      )}
-
-      <SectionCard title="Tasks da equipe">
-        {tasksEquipe.length === 0
-          ? <EmptyState message="Nenhuma task em andamento" />
-          : tasksEquipe.map((t) => <TaskRow key={t.id} task={t} />)
-        }
-      </SectionCard>
-    </div>
-  );
-}
-
-function DevDashboard({ profile }: { profile: UserProfile }) {
-  const [tasks, setTasks] = useState<Task[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    apiFetch("/tasks/minhas/")
-      .catch(() => apiFetch("/tasks/"))
-      .then((res: unknown) => {
-        const arr = Array.isArray(res) ? res as Task[] : (res as { results?: Task[] }).results ?? [];
-        setTasks(arr);
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  if (loading) return <LoadingSpinner />;
-
-  const emAndamento = tasks.filter((t) => t.status === "EM_ANDAMENTO");
-  const todo        = tasks.filter((t) => t.status === "TODO");
-  const bloqueadas  = tasks.filter((t) => t.status === "BLOQUEADO");
-  const concluidas  = tasks.filter((t) => t.status === "CONCLUIDO");
-
-  return (
-    <div>
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Meu Painel</h1>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Suas tasks e atividades</p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <StatCard icon="⚡" value={emAndamento.length} label="Em andamento" accent="#F59E0B" />
-        <StatCard icon="📋" value={todo.length}        label="A fazer"      accent="#3B82F6" />
-        <StatCard icon="🚫" value={bloqueadas.length}  label="Bloqueadas"   accent="#EF4444" />
-        <StatCard icon="✅" value={concluidas.length}  label="Concluídas"   accent="#10B981" />
-      </div>
-
-      <SectionCard title="Minhas tasks">
-        {tasks.length === 0
-          ? <EmptyState message="Nenhuma task atribuída a você" />
-          : tasks.slice(0, 10).map((t) => <TaskRow key={t.id} task={t} />)
-        }
-      </SectionCard>
-    </div>
-  );
-}
-
-function QADashboard({ profile }: { profile: UserProfile }) {
-  const [paraRevisar, setParaRevisar] = useState<Task[]>([]);
-  const [historico, setHistorico]     = useState<Task[]>([]);
-  const [loading, setLoading]         = useState(true);
-  const [feedback, setFeedback]       = useState<Record<number, FeedbackStatus>>({});
-
-  useEffect(() => {
-    apiFetch("/tasks/?status=REVISAO")
-      .catch(() => apiFetch("/tasks/"))
-      .then((res: unknown) => {
-        const all = Array.isArray(res) ? res as Task[] : (res as { results?: Task[] }).results ?? [];
-        setParaRevisar(all.filter((t) => t.status === "REVISAO"));
-        setHistorico(all.filter((t) => t.status === "CONCLUIDO").slice(0, 5));
-        setLoading(false);
-      })
-      .catch(() => setLoading(false));
-  }, []);
-
-  const handleAprovar = (id: number) => {
-    setFeedback((f) => ({ ...f, [id]: "aprovando" }));
-    apiFetch(`/tasks/${id}/`, { method: "PATCH", body: JSON.stringify({ status: "CONCLUIDO" }) })
-      .then(() => setFeedback((f) => ({ ...f, [id]: "aprovado" })))
-      .catch(() => setFeedback((f) => ({ ...f, [id]: "erro" })));
-  };
-
-  const handleReprovar = (id: number) => {
-    setFeedback((f) => ({ ...f, [id]: "reprovando" }));
-    apiFetch(`/tasks/${id}/`, { method: "PATCH", body: JSON.stringify({ status: "EM_ANDAMENTO" }) })
-      .then(() => setFeedback((f) => ({ ...f, [id]: "reprovado" })))
-      .catch(() => setFeedback((f) => ({ ...f, [id]: "erro" })));
-  };
-
-  if (loading) return <LoadingSpinner />;
-
-  return (
-    <div>
-      <div style={{ marginBottom: "1.5rem" }}>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Painel QA</h1>
-        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Tasks aguardando revisão</p>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
-        <StatCard icon="🔍" value={paraRevisar.length} label="Para revisar" accent="#F59E0B" />
-        <StatCard icon="✅" value={Object.values(feedback).filter((v) => v === "aprovado").length}  label="Aprovadas"   accent="#10B981" />
-        <StatCard icon="↩️" value={Object.values(feedback).filter((v) => v === "reprovado").length} label="Reprovadas"  accent="#EF4444" />
-      </div>
-
-      <SectionCard title="Aguardando revisão">
-        {paraRevisar.length === 0
-          ? <EmptyState message="Nenhuma task aguardando revisão 🎉" />
-          : paraRevisar.map((t) => {
-            const fb = feedback[t.id];
-            return (
-              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid #F3F4F6", gap: 8 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 500, fontSize: 14, color: "#111827", marginBottom: 2 }}>{t.titulo}</div>
-                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>{t.responsavel_nome}</div>
-                </div>
-                <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
-                  <Badge label={t.prioridade} colors={PRIORIDADE_COLOR[t.prioridade]} />
-                  {fb === "aprovado"  && <Badge label="Aprovado ✓"  colors={{ bg: "#D1FAE5", text: "#065F46" }} />}
-                  {fb === "reprovado" && <Badge label="Reprovado ✗" colors={{ bg: "#FEE2E2", text: "#991B1B" }} />}
-                  {fb === "erro"      && <Badge label="Erro"        colors={{ bg: "#FEE2E2", text: "#991B1B" }} />}
-                  {!fb && (
-                    <>
-                      <button onClick={() => handleAprovar(t.id)}  style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "none", background: "#D1FAE5", color: "#065F46", cursor: "pointer", fontWeight: 600 }}>✓ Aprovar</button>
-                      <button onClick={() => handleReprovar(t.id)} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "none", background: "#FEE2E2", color: "#991B1B", cursor: "pointer", fontWeight: 600 }}>✗ Reprovar</button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })
-        }
-      </SectionCard>
-
-      {historico.length > 0 && (
-        <SectionCard title="Concluídas recentes">
-          {historico.map((t) => (
-            <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
-              <div style={{ fontWeight: 500, fontSize: 14 }}>{t.titulo}</div>
-              <Badge label="CONCLUÍDO" colors={STATUS_COLOR.CONCLUIDO} />
-            </div>
-          ))}
-        </SectionCard>
-      )}
-    </div>
-  );
-}
-
-// ─── ROTEADOR POR CARGO ───────────────────────────────────────────────────────
-
-function DashboardContent({ cargo, profile }: { cargo: Cargo; profile: UserProfile }) {
-  switch (cargo) {
-    case "ADMIN":   return <AdminDashboard   profile={profile} />;
-    case "GERENTE": return <GerenteDashboard profile={profile} />;
-    case "DEV":     return <DevDashboard     profile={profile} />;
-    case "QA":      return <QADashboard      profile={profile} />;
-  }
-}
-
-// ─── FORM STATE ───────────────────────────────────────────────────────────────
-
-interface FormState {
-  email: string;
-  password: string;
-  nome: string;
-  regEmail: string;
-}
-
-// ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
+// ─── App Principal ────────────────────────────────────────────────────────────
 
 export default function App() {
-  const [view, setView]           = useState<"login" | "dashboard">("login");
-  const [form, setForm]           = useState<FormState>({ email: "", password: "", nome: "", regEmail: "" });
-  const [profile, setProfile]     = useState<UserProfile | null>(null);
-  const [error, setError]         = useState("");
-  const [loading, setLoading]     = useState(false);
-  const [isRegister, setIsRegister] = useState(false);
+  const [view, setView]             = useState<AppView>('login')
+  const [profile, setProfile]       = useState<UserProfile | null>(null)
+  const [isRegister, setIsRegister] = useState(false)
+  const [form, setForm]             = useState({ email: '', password: '', nome: '', regEmail: '' })
+  const [error, setError]           = useState('')
+  const [loading, setLoading]       = useState(false)
+  const [mfaPending, setMfaPending] = useState<MfaPending | null>(null)
+  const [showMfaSettings, setShowMfaSettings] = useState(false)
 
   useEffect(() => {
-    if (localStorage.getItem("access_token")) fetchProfile();
-  }, []);
+    if (localStorage.getItem('access_token')) fetchProfile()
+  }, [])
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
 
   const fetchProfile = async () => {
     try {
-      const p = await apiFetch("/profile/") as UserProfile;
-      setProfile(p);
-      setView("dashboard");
+      const p = await apiFetch('/profile/')
+      setProfile(p)
+      setView('dashboard')
     } catch {
-      localStorage.removeItem("access_token");
-      localStorage.removeItem("refresh_token");
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
     }
-  };
-
-  const handleLogin = async () => {
-    setError(""); setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/token/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.email, password: form.password }),
-      });
-      const data = await res.json() as { access?: string; refresh?: string; detail?: string; error?: string };
-      if (!res.ok) throw data;
-      localStorage.setItem("access_token", data.access!);
-      localStorage.setItem("refresh_token", data.refresh!);
-      await fetchProfile();
-    } catch (err: unknown) {
-      const e = err as { detail?: string; error?: string };
-      setError(e?.detail ?? e?.error ?? "Credenciais inválidas.");
-    } finally { setLoading(false); }
-  };
-
-  const handleRegister = async () => {
-    setError(""); setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/register/`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: form.regEmail, password: form.password, nome: form.nome, cargo: "DEV" }),
-      });
-      const data = await res.json() as { error?: string; detail?: string };
-      if (!res.ok) throw data;
-      setIsRegister(false);
-      setError("✅ Conta criada! Faça login.");
-    } catch (err: unknown) {
-      const e = err as { detail?: string; error?: string };
-      setError(e?.error ?? e?.detail ?? "Erro ao registrar.");
-    } finally { setLoading(false); }
-  };
-
-  const handleLogout = () => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    setProfile(null);
-    setView("login");
-    setForm({ email: "", password: "", nome: "", regEmail: "" });
-  };
-
-  if (view === "dashboard" && profile) {
-    const cargo = profile.cargo;
-    return (
-      <div style={{ display: "flex", minHeight: "100vh", background: "#F9FAFB", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
-        <aside style={{
-          width: 220, background: "#fff", borderRight: "1px solid #E5E7EB",
-          display: "flex", flexDirection: "column", justifyContent: "space-between",
-          position: "sticky", top: 0, height: "100vh",
-        }}>
-          <div>
-            <div style={{ padding: "1.25rem 1rem", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 32, height: 32, background: "#2563EB", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth="2">
-                  <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-                  <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-                </svg>
-              </div>
-              <span style={{ fontWeight: 700, fontSize: 17, color: "#111827" }}>Lazuli</span>
-            </div>
-
-            <nav style={{ padding: "1rem 0.75rem" }}>
-              {([
-                { label: "Dashboard", icon: "🏠" },
-                { label: "Projetos",  icon: "📁" },
-                { label: "Tasks",     icon: "✅" },
-                { label: "Sprints",   icon: "🏃" },
-                ...(cargo === "ADMIN" ? [{ label: "Usuários", icon: "👥" }] : []),
-              ]).map((item) => (
-                <div key={item.label} style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  padding: "9px 12px", borderRadius: 8, cursor: "pointer",
-                  fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 2,
-                }}>
-                  <span>{item.icon}</span>{item.label}
-                </div>
-              ))}
-            </nav>
-          </div>
-
-          <div style={{ padding: "1rem", borderTop: "1px solid #E5E7EB" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-              <Avatar name={profile.username} size={34} />
-              <div style={{ overflow: "hidden" }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {profile.username}
-                </div>
-                <Badge label={cargo} colors={CARGO_COLOR[cargo]} />
-              </div>
-            </div>
-            <button onClick={handleLogout} style={{
-              width: "100%", background: "none", border: "1px solid #FCA5A5",
-              borderRadius: 8, padding: "8px 0", color: "#EF4444",
-              cursor: "pointer", fontSize: 13, fontWeight: 500,
-            }}>Sair</button>
-          </div>
-        </aside>
-
-        <main style={{ flex: 1, padding: "2rem", maxWidth: 1000, overflowY: "auto" }}>
-          <DashboardContent cargo={cargo} profile={profile} />
-        </main>
-      </div>
-    );
   }
 
-  const inputStyle: CSSProperties = {
-    padding: "11px 14px", borderRadius: 10, border: "1px solid #D1D5DB",
-    fontSize: 14, color: "#111827", outline: "none", width: "100%", boxSizing: "border-box",
-  };
+  const salvarTokens = (tokens: { access: string; refresh: string }) => {
+    localStorage.setItem('access_token', tokens.access)
+    localStorage.setItem('refresh_token', tokens.refresh)
+  }
 
-  return (
-    <div style={{
-      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
-      background: "linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
-      fontFamily: "'Segoe UI', system-ui, sans-serif", padding: "1rem",
-    }}>
-      <div style={{
-        background: "#fff", borderRadius: 20, border: "1px solid #E5E7EB",
-        padding: "2.5rem", width: "100%", maxWidth: 380,
-        boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "2rem" }}>
-          <div style={{ width: 36, height: 36, background: "#2563EB", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth="2">
-              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
-              <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
-            </svg>
-          </div>
-          <span style={{ fontWeight: 700, fontSize: 20, color: "#111827" }}>Lazuli</span>
-        </div>
+  const handleMfaSuccess = async (tokens: { access: string; refresh: string }) => {
+    salvarTokens(tokens)
+    setMfaPending(null)
+    await fetchProfile()
+  }
 
-        <h2 style={{ margin: "0 0 1.5rem", fontSize: 18, fontWeight: 700, color: "#111827" }}>
-          {isRegister ? "Criar conta" : "Entrar"}
-        </h2>
+  const handleLogout = () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    setProfile(null)
+    setView('login')
+    setForm({ email: '', password: '', nome: '', regEmail: '' })
+  }
 
-        {error && (
-          <div style={{
-            padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16,
-            background: error.startsWith("✅") ? "#D1FAE5" : "#FEE2E2",
-            color:      error.startsWith("✅") ? "#065F46"  : "#991B1B",
-          }}>{error}</div>
-        )}
+  // ── Login normal ─────────────────────────────────────────────────────────────
 
-        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-          {isRegister && (
-            <input placeholder="Nome completo" value={form.nome}
-              onChange={(e) => setForm({ ...form, nome: e.target.value })}
-              style={inputStyle} />
-          )}
-          <input placeholder="Email" type="email"
-            value={isRegister ? form.regEmail : form.email}
-            onChange={(e) => setForm(isRegister ? { ...form, regEmail: e.target.value } : { ...form, email: e.target.value })}
-            style={inputStyle} />
-          <input placeholder="Senha" type="password" value={form.password}
-            onChange={(e) => setForm({ ...form, password: e.target.value })}
-            onKeyDown={(e) => { if (e.key === "Enter") isRegister ? handleRegister() : handleLogin(); }}
-            style={inputStyle} />
+  const handleLogin = async () => {
+    setError(''); setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/token/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: form.email, password: form.password }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw data
+
+      if (data.mfa_required) {
+        // Redireciona para o challenge MFA
+        setMfaPending({ mfa_token: data.mfa_token, mfa_tipo: data.mfa_tipo })
+        return
+      }
+
+      salvarTokens(data)
+      await fetchProfile()
+    } catch (err: any) {
+      setError(err?.detail ?? err?.error ?? 'Credenciais inválidas.')
+    } finally { setLoading(false) }
+  }
+
+  // ── Registro ─────────────────────────────────────────────────────────────────
+
+  const handleRegister = async () => {
+    setError(''); setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/register/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: form.regEmail, password: form.password,
+          nome: form.nome, cargo: 'DEV',
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw data
+      setIsRegister(false)
+      setError('✅ Conta criada! Faça login.')
+    } catch (err: any) {
+      setError(err?.error ?? err?.detail ?? 'Erro ao registrar.')
+    } finally { setLoading(false) }
+  }
+
+  // ── Google OAuth ─────────────────────────────────────────────────────────────
+
+  const handleGoogleSuccess = async (credentialResponse: { credential?: string }) => {
+    const id_token = credentialResponse.credential
+    if (!id_token) return
+
+    setError(''); setLoading(true)
+    try {
+      const res = await fetch(`${API_BASE}/auth/google/`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id_token }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw data
+
+      if (data.mfa_required) {
+        setMfaPending({ mfa_token: data.mfa_token, mfa_tipo: data.mfa_tipo })
+        return
+      }
+
+      salvarTokens(data)
+      await fetchProfile()
+    } catch (err: any) {
+      setError(err?.error ?? err?.detail ?? 'Erro ao entrar com Google.')
+    } finally { setLoading(false) }
+  }
+
+  // ── MFA Challenge ─────────────────────────────────────────────────────────────
+
+  if (mfaPending) {
+    return (
+      <MfaChallenge
+        mfaTipo={mfaPending.mfa_tipo}
+        mfaToken={mfaPending.mfa_token}
+        onSuccess={handleMfaSuccess}
+        onCancel={() => setMfaPending(null)}
+      />
+    )
+  }
+
+  // ── Dashboard ─────────────────────────────────────────────────────────────────
+
+  if (view === 'dashboard' && profile) {
+    return (
+      <>
+        <DashboardRouter cargo={profile.cargo} />
+
+        {/* Botão de settings MFA no sidebar — integre onde preferir */}
+        <div style={{ position: 'fixed', bottom: 72, left: 0, width: 220, padding: '0 1rem' }}>
           <button
-            onClick={isRegister ? handleRegister : handleLogin}
-            disabled={loading}
+            onClick={() => setShowMfaSettings(true)}
             style={{
-              padding: "12px", background: loading ? "#93C5FD" : "#2563EB",
-              color: "#fff", border: "none", borderRadius: 10,
-              fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", marginTop: 4,
+              width: '100%', background: 'none',
+              border: '1px solid #E5E7EB', borderRadius: 8,
+              padding: '8px 12px', cursor: 'pointer',
+              fontSize: 13, color: '#374151', fontWeight: 500,
+              display: 'flex', alignItems: 'center', gap: 8,
             }}
           >
-            {loading ? "Aguarde..." : isRegister ? "Criar conta" : "Entrar"}
+            <span>{profile.mfa_ativo ? '🔐' : '🔓'}</span>
+            {profile.mfa_ativo ? 'MFA ativo' : 'Ativar MFA'}
           </button>
         </div>
 
-        <p style={{ textAlign: "center", marginTop: "1.25rem", fontSize: 13, color: "#6B7280" }}>
-          {isRegister ? "Já tem conta? " : "Não tem conta? "}
-          <span onClick={() => { setIsRegister(!isRegister); setError(""); }}
-            style={{ color: "#2563EB", cursor: "pointer", fontWeight: 500 }}>
-            {isRegister ? "Fazer login" : "Cadastre-se"}
-          </span>
-        </p>
+        <section id="center">
+          <button onClick={handleLogout}>Sair</button>
+        </section>
+
+        {showMfaSettings && (
+          <MfaSettingsModal onClose={() => {
+            setShowMfaSettings(false)
+            fetchProfile() // Atualiza status do MFA no profile
+          }} />
+        )}
+      </>
+    )
+  }
+
+  // ── Tela de Login / Registro ──────────────────────────────────────────────────
+
+  const inputStyle: CSSProperties = {
+    padding: '11px 14px', borderRadius: 10, border: '1px solid #D1D5DB',
+    fontSize: 14, color: '#111827', outline: 'none',
+    width: '100%', boxSizing: 'border-box',
+  }
+
+  return (
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <div style={{
+        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)',
+        fontFamily: "'Segoe UI', system-ui, sans-serif", padding: '1rem',
+      }}>
+        <div style={{
+          background: '#fff', borderRadius: 20, border: '1px solid #E5E7EB',
+          padding: '2.5rem', width: '100%', maxWidth: 380,
+          boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+        }}>
+          {/* Logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '2rem' }}>
+            <div style={{ width: 36, height: 36, background: '#2563EB', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth="2">
+                <rect x="3" y="3" width="7" height="7" rx="1"/>
+                <rect x="14" y="3" width="7" height="7" rx="1"/>
+                <rect x="3" y="14" width="7" height="7" rx="1"/>
+                <rect x="14" y="14" width="7" height="7" rx="1"/>
+              </svg>
+            </div>
+            <span style={{ fontWeight: 700, fontSize: 20, color: '#111827' }}>Lazuli</span>
+          </div>
+
+          <h2 style={{ margin: '0 0 1.5rem', fontSize: 18, fontWeight: 700, color: '#111827' }}>
+            {isRegister ? 'Criar conta' : 'Entrar'}
+          </h2>
+
+          {error && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16,
+              background: error.startsWith('✅') ? '#D1FAE5' : '#FEE2E2',
+              color:      error.startsWith('✅') ? '#065F46'  : '#991B1B',
+            }}>{error}</div>
+          )}
+
+          {/* Formulário */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {isRegister && (
+              <input
+                placeholder="Nome completo"
+                value={form.nome}
+                onChange={e => setForm({ ...form, nome: e.target.value })}
+                style={inputStyle}
+              />
+            )}
+            <input
+              placeholder="Email"
+              type="email"
+              value={isRegister ? form.regEmail : form.email}
+              onChange={e => setForm(isRegister ? { ...form, regEmail: e.target.value } : { ...form, email: e.target.value })}
+              style={inputStyle}
+            />
+            <input
+              placeholder="Senha"
+              type="password"
+              value={form.password}
+              onChange={e => setForm({ ...form, password: e.target.value })}
+              onKeyDown={e => { if (e.key === 'Enter') isRegister ? handleRegister() : handleLogin() }}
+              style={inputStyle}
+            />
+
+            <button
+              onClick={isRegister ? handleRegister : handleLogin}
+              disabled={loading}
+              style={{
+                padding: '12px', background: loading ? '#93C5FD' : '#2563EB',
+                color: '#fff', border: 'none', borderRadius: 10,
+                fontSize: 14, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', marginTop: 4,
+              }}
+            >
+              {loading ? 'Aguarde...' : isRegister ? 'Criar conta' : 'Entrar'}
+            </button>
+
+            {/* Divisor */}
+            {!isRegister && (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
+                  <div style={{ flex: 1, height: 1, background: '#E5E7EB' }} />
+                  <span style={{ fontSize: 12, color: '#9CA3AF' }}>ou</span>
+                  <div style={{ flex: 1, height: 1, background: '#E5E7EB' }} />
+                </div>
+
+                {/* Botão Google */}
+                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                  {GOOGLE_CLIENT_ID ? (
+                    <GoogleLogin
+                      onSuccess={handleGoogleSuccess}
+                      onError={() => setError('Falha ao autenticar com Google.')}
+                      text="signin_with"
+                      shape="rectangular"
+                      size="large"
+                      width="332"
+                    />
+                  ) : (
+                    <div style={{
+                      padding: '10px 14px', borderRadius: 8, fontSize: 12,
+                      background: '#FEF3C7', color: '#92400E', textAlign: 'center',
+                    }}>
+                      Configure VITE_GOOGLE_CLIENT_ID no .env para ativar o login com Google.
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: 13, color: '#6B7280' }}>
+            {isRegister ? 'Já tem conta? ' : 'Não tem conta? '}
+            <span
+              onClick={() => { setIsRegister(!isRegister); setError('') }}
+              style={{ color: '#2563EB', cursor: 'pointer', fontWeight: 500 }}
+            >
+              {isRegister ? 'Fazer login' : 'Cadastre-se'}
+            </span>
+          </p>
+        </div>
       </div>
-    </div>
-  );
+    </GoogleOAuthProvider>
+  )
 }
 ----- frontend/src/api.ts -----
 import axios from 'axios'
@@ -1099,6 +700,489 @@ api.interceptors.request.use((config) => {
 })
 
 export default api
+----- frontend/src/auth/MfaChallenge.tsx -----
+// frontend/src/auth/MfaChallenge.tsx
+// Tela exibida após login com senha quando MFA está ativo.
+// O usuário digita o código TOTP ou OTP de e-mail.
+
+import { useState } from 'react'
+import type { MfaTipo } from '../hooks/useMFA'
+import { useMFA } from '../hooks/useMFA'
+
+interface Props {
+  mfaTipo: MfaTipo
+  mfaToken: string
+  onSuccess: (tokens: { access: string; refresh: string }) => void
+  onCancel: () => void
+}
+
+export default function MfaChallenge({ mfaTipo, mfaToken, onSuccess, onCancel }: Props) {
+  const [code, setCode]           = useState('')
+  const [reenvioOk, setReenvioOk] = useState(false)
+  const { loading, error, challenge, resendEmail } = useMFA()
+
+  const handleSubmit = async () => {
+    if (code.length < 6) return
+    const result = await challenge(mfaToken, code)
+    if (result) onSuccess(result as { access: string; refresh: string })
+  }
+
+  const handleReenvio = async () => {
+    const result = await resendEmail(mfaToken)
+    if (result) setReenvioOk(true)
+  }
+
+  return (
+    <div style={styles.overlay}>
+      <div style={styles.card}>
+        {/* Ícone */}
+        <div style={styles.iconWrap}>
+          <span style={{ fontSize: 28 }}>{mfaTipo === 'TOTP' ? '🔐' : '📧'}</span>
+        </div>
+
+        <h2 style={styles.title}>Verificação em duas etapas</h2>
+        <p style={styles.sub}>
+          {mfaTipo === 'TOTP'
+            ? 'Abra o Google Authenticator (ou Authy) e insira o código de 6 dígitos.'
+            : `Insira o código enviado para seu e-mail.`}
+        </p>
+
+        {/* Input do código */}
+        <input
+          style={styles.codeInput}
+          type="text"
+          inputMode="numeric"
+          maxLength={6}
+          placeholder="000000"
+          value={code}
+          onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          autoFocus
+        />
+
+        {error && <p style={styles.error}>{error}</p>}
+        {reenvioOk && <p style={styles.success}>Novo código enviado!</p>}
+
+        <button
+          style={{ ...styles.btn, opacity: loading || code.length < 6 ? 0.6 : 1 }}
+          onClick={handleSubmit}
+          disabled={loading || code.length < 6}
+        >
+          {loading ? 'Verificando...' : 'Confirmar'}
+        </button>
+
+        {mfaTipo === 'EMAIL' && (
+          <button style={styles.link} onClick={handleReenvio} disabled={loading}>
+            Reenviar código
+          </button>
+        )}
+
+        <button style={{ ...styles.link, color: '#9CA3AF' }} onClick={onCancel}>
+          ← Voltar ao login
+        </button>
+      </div>
+    </div>
+  )
+}
+
+const styles: Record<string, React.CSSProperties> = {
+  overlay: {
+    position: 'fixed', inset: 0,
+    background: 'linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    fontFamily: "'Segoe UI', system-ui, sans-serif",
+  },
+  card: {
+    background: '#fff', borderRadius: 20, border: '1px solid #E5E7EB',
+    padding: '2.5rem', width: '100%', maxWidth: 380,
+    boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
+    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
+  },
+  iconWrap: {
+    width: 56, height: 56, borderRadius: 14,
+    background: '#EFF6FF', border: '1px solid #BFDBFE',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    marginBottom: 4,
+  },
+  title: { margin: 0, fontSize: 18, fontWeight: 700, color: '#111827', textAlign: 'center' },
+  sub: { margin: 0, fontSize: 13, color: '#6B7280', textAlign: 'center', lineHeight: 1.5 },
+  codeInput: {
+    width: '100%', padding: '14px', textAlign: 'center',
+    fontSize: 28, fontWeight: 700, letterSpacing: 12,
+    border: '2px solid #D1D5DB', borderRadius: 12,
+    outline: 'none', boxSizing: 'border-box',
+    fontFamily: 'monospace',
+  },
+  btn: {
+    width: '100%', padding: '12px',
+    background: '#2563EB', color: '#fff',
+    border: 'none', borderRadius: 10,
+    fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  },
+  link: {
+    background: 'none', border: 'none',
+    color: '#2563EB', fontSize: 13, cursor: 'pointer',
+    padding: '4px 0', fontWeight: 500,
+  },
+  error:   { color: '#991B1B', background: '#FEE2E2', padding: '8px 14px', borderRadius: 8, fontSize: 13, width: '100%', boxSizing: 'border-box' },
+  success: { color: '#065F46', background: '#D1FAE5', padding: '8px 14px', borderRadius: 8, fontSize: 13, width: '100%', boxSizing: 'border-box' },
+}
+----- frontend/src/auth/MfaSettingsModal.tsx -----
+// frontend/src/auth/MfaSettingsModal.tsx
+// Modal acessível pelas configurações do usuário para ativar / desativar MFA.
+// Suporta TOTP (QR code) e Email OTP.
+
+import { useState, useEffect } from 'react'
+import { X, Shield, ShieldCheck, ShieldOff, Smartphone, Mail } from 'lucide-react'
+import { useMFA } from '../hooks/useMFA'
+import type { MfaTipo, MfaStatus, SetupTotpResult } from '../hooks/useMFA'
+
+interface Props {
+  onClose: () => void
+}
+
+type Step =
+  | 'menu'
+  | 'choose-type'
+  | 'setup-totp'
+  | 'setup-email'
+  | 'verify'
+  | 'disable'
+  | 'done'
+
+export default function MfaSettingsModal({ onClose }: Props) {
+  const { loading, error, getStatus, setupTotp, verifyTotp, setupEmail, verifyEmail, disable } = useMFA()
+
+  const [step, setStep]           = useState<Step>('menu')
+  const [mfaStatus, setMfaStatus] = useState<MfaStatus | null>(null)
+  const [setupType, setSetupType] = useState<MfaTipo | null>(null)
+  const [totpData, setTotpData]   = useState<SetupTotpResult | null>(null)
+  const [code, setCode]           = useState('')
+  const [password, setPassword]   = useState('')
+  const [message, setMessage]     = useState('')
+  const [showSecret, setShowSecret] = useState(false)
+
+  useEffect(() => {
+    getStatus().then(s => { if (s) setMfaStatus(s) })
+  }, [])
+
+  // ── Handlers ────────────────────────────────────────────────────────────────
+
+  const handleSetupTotp = async () => {
+    const data = await setupTotp()
+    if (data) {
+      setTotpData(data)
+      setSetupType('TOTP')
+      setStep('setup-totp')
+    }
+  }
+
+  const handleSetupEmail = async () => {
+    const result = await setupEmail()
+    if (result) {
+      setSetupType('EMAIL')
+      setStep('setup-email')
+    }
+  }
+
+  const handleVerify = async () => {
+    let result = null
+    if (setupType === 'TOTP')  result = await verifyTotp(code)
+    if (setupType === 'EMAIL') result = await verifyEmail(code)
+    if (result) {
+      setMfaStatus({ mfa_ativo: true, mfa_tipo: setupType })
+      setMessage(result.message)
+      setStep('done')
+    }
+  }
+
+  const handleDisable = async () => {
+    const result = await disable(password)
+    if (result) {
+      setMfaStatus({ mfa_ativo: false, mfa_tipo: null })
+      setMessage(result.message)
+      setStep('done')
+    }
+  }
+
+  // ── Render ───────────────────────────────────────────────────────────────────
+
+  return (
+    <div style={styles.overlay} onClick={e => e.target === e.currentTarget && onClose()}>
+      <div style={styles.card}>
+        {/* Header */}
+        <div style={styles.header}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Shield size={18} color="#2563EB" />
+            <span style={{ fontWeight: 700, fontSize: 15, color: '#111827' }}>
+              Autenticação em dois fatores
+            </span>
+          </div>
+          <button style={styles.closeBtn} onClick={onClose}><X size={18} /></button>
+        </div>
+
+        {/* Conteúdo */}
+        <div style={styles.body}>
+
+          {/* ── MENU ─────────────────────────────────────────────────────── */}
+          {step === 'menu' && (
+            <>
+              {mfaStatus === null ? (
+                <p style={styles.sub}>Carregando status...</p>
+              ) : mfaStatus.mfa_ativo ? (
+                <>
+                  <div style={styles.statusBadge('green')}>
+                    <ShieldCheck size={16} />
+                    MFA ativo via {mfaStatus.mfa_tipo === 'TOTP' ? 'Authenticator App' : 'E-mail'}
+                  </div>
+                  <p style={styles.sub}>
+                    Sua conta está protegida com verificação em dois fatores.
+                  </p>
+                  <button style={styles.btnDanger} onClick={() => setStep('disable')}>
+                    <ShieldOff size={14} /> Desativar MFA
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div style={styles.statusBadge('gray')}>
+                    <Shield size={16} />
+                    MFA desativado
+                  </div>
+                  <p style={styles.sub}>
+                    Adicione uma camada extra de segurança à sua conta escolhendo um método abaixo.
+                  </p>
+                  <button style={styles.btnPrimary} onClick={() => setStep('choose-type')}>
+                    Ativar MFA
+                  </button>
+                </>
+              )}
+            </>
+          )}
+
+          {/* ── ESCOLHER TIPO ─────────────────────────────────────────────── */}
+          {step === 'choose-type' && (
+            <>
+              <p style={styles.sub}>Escolha como você quer receber os códigos:</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                <button style={styles.optionBtn} onClick={handleSetupTotp} disabled={loading}>
+                  <Smartphone size={20} color="#2563EB" />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>Authenticator App</div>
+                    <div style={{ fontSize: 12, color: '#6B7280' }}>
+                      Google Authenticator, Authy, 1Password…
+                    </div>
+                  </div>
+                </button>
+                <button style={styles.optionBtn} onClick={handleSetupEmail} disabled={loading}>
+                  <Mail size={20} color="#2563EB" />
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>Código por e-mail</div>
+                    <div style={{ fontSize: 12, color: '#6B7280' }}>
+                      Receba um código de 6 dígitos no seu e-mail.
+                    </div>
+                  </div>
+                </button>
+              </div>
+              <button style={styles.btnBack} onClick={() => setStep('menu')}>← Voltar</button>
+            </>
+          )}
+
+          {/* ── SETUP TOTP ────────────────────────────────────────────────── */}
+          {step === 'setup-totp' && totpData && (
+            <>
+              <p style={styles.sub}>
+                Escaneie o QR code com o app Authenticator:
+              </p>
+              <img
+                src={`data:image/png;base64,${totpData.qrcode}`}
+                alt="QR Code TOTP"
+                style={{ width: 180, height: 180, borderRadius: 12, border: '1px solid #E5E7EB', display: 'block', margin: '0 auto' }}
+              />
+              <button style={styles.btnBack} onClick={() => setShowSecret(s => !s)}>
+                {showSecret ? 'Ocultar chave manual' : 'Digitar manualmente'}
+              </button>
+              {showSecret && (
+                <div style={styles.secretBox}>
+                  <span style={{ fontFamily: 'monospace', fontSize: 13, letterSpacing: 2 }}>
+                    {totpData.secret}
+                  </span>
+                </div>
+              )}
+              <p style={{ ...styles.sub, marginTop: 8 }}>
+                Depois de escanear, insira o código gerado pelo app:
+              </p>
+              <input
+                style={styles.codeInput}
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000000"
+                value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={e => e.key === 'Enter' && handleVerify()}
+              />
+              {error && <p style={styles.error}>{error}</p>}
+              <button
+                style={{ ...styles.btnPrimary, opacity: code.length < 6 ? 0.6 : 1 }}
+                onClick={handleVerify}
+                disabled={loading || code.length < 6}
+              >
+                {loading ? 'Verificando...' : 'Confirmar e ativar'}
+              </button>
+              <button style={styles.btnBack} onClick={() => setStep('choose-type')}>← Voltar</button>
+            </>
+          )}
+
+          {/* ── SETUP EMAIL ───────────────────────────────────────────────── */}
+          {step === 'setup-email' && (
+            <>
+              <div style={styles.statusBadge('blue')}>
+                <Mail size={14} /> Código enviado para seu e-mail
+              </div>
+              <p style={styles.sub}>Insira o código de 6 dígitos recebido:</p>
+              <input
+                style={styles.codeInput}
+                type="text"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="000000"
+                value={code}
+                onChange={e => setCode(e.target.value.replace(/\D/g, ''))}
+                onKeyDown={e => e.key === 'Enter' && handleVerify()}
+                autoFocus
+              />
+              {error && <p style={styles.error}>{error}</p>}
+              <button
+                style={{ ...styles.btnPrimary, opacity: code.length < 6 ? 0.6 : 1 }}
+                onClick={handleVerify}
+                disabled={loading || code.length < 6}
+              >
+                {loading ? 'Verificando...' : 'Confirmar e ativar'}
+              </button>
+              <button style={styles.btnBack} onClick={() => { setupEmail(); setCode('') }}>
+                Reenviar código
+              </button>
+              <button style={styles.btnBack} onClick={() => setStep('choose-type')}>← Voltar</button>
+            </>
+          )}
+
+          {/* ── DESATIVAR ─────────────────────────────────────────────────── */}
+          {step === 'disable' && (
+            <>
+              <p style={styles.sub}>
+                Para desativar o MFA, confirme sua senha:
+              </p>
+              <input
+                style={styles.input}
+                type="password"
+                placeholder="Sua senha atual"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleDisable()}
+                autoFocus
+              />
+              {error && <p style={styles.error}>{error}</p>}
+              <button style={styles.btnDanger} onClick={handleDisable} disabled={loading || !password}>
+                {loading ? 'Desativando...' : 'Confirmar desativação'}
+              </button>
+              <button style={styles.btnBack} onClick={() => setStep('menu')}>← Voltar</button>
+            </>
+          )}
+
+          {/* ── DONE ─────────────────────────────────────────────────────── */}
+          {step === 'done' && (
+            <>
+              <div style={{ textAlign: 'center', padding: '1rem 0' }}>
+                <span style={{ fontSize: 48 }}>
+                  {mfaStatus?.mfa_ativo ? '🔐' : '🔓'}
+                </span>
+                <p style={{ ...styles.sub, marginTop: 12 }}>{message}</p>
+              </div>
+              <button style={styles.btnPrimary} onClick={onClose}>Fechar</button>
+            </>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Estilos ──────────────────────────────────────────────────────────────────
+
+const styles: Record<string, any> = {
+  overlay: {
+    position: 'fixed' as const, inset: 0,
+    background: 'rgba(0,0,0,0.4)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 100, padding: '1rem',
+    fontFamily: "'Segoe UI', system-ui, sans-serif",
+  },
+  card: {
+    background: '#fff', borderRadius: 16, border: '1px solid #E5E7EB',
+    width: '100%', maxWidth: 420,
+    boxShadow: '0 8px 32px rgba(0,0,0,0.12)',
+    overflow: 'hidden',
+  },
+  header: {
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '1rem 1.25rem', borderBottom: '1px solid #F3F4F6',
+    background: '#FAFAFA',
+  },
+  closeBtn: {
+    background: 'none', border: 'none', cursor: 'pointer',
+    color: '#9CA3AF', padding: 4, borderRadius: 6,
+  },
+  body: {
+    padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 12,
+  },
+  sub: { margin: 0, fontSize: 13, color: '#6B7280', lineHeight: 1.6 },
+  statusBadge: (color: 'green' | 'gray' | 'blue') => ({
+    display: 'flex', alignItems: 'center', gap: 6,
+    padding: '8px 12px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+    ...(color === 'green' ? { background: '#D1FAE5', color: '#065F46' }
+      : color === 'blue'  ? { background: '#DBEAFE', color: '#1D4ED8' }
+      :                     { background: '#F3F4F6', color: '#374151' }),
+  }),
+  btnPrimary: {
+    width: '100%', padding: '11px', background: '#2563EB', color: '#fff',
+    border: 'none', borderRadius: 10, fontSize: 14, fontWeight: 600, cursor: 'pointer',
+  },
+  btnDanger: {
+    width: '100%', padding: '11px', background: '#FEE2E2', color: '#991B1B',
+    border: '1px solid #FECACA', borderRadius: 10, fontSize: 14, fontWeight: 600,
+    cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+  },
+  btnBack: {
+    background: 'none', border: 'none', color: '#6B7280', fontSize: 13,
+    cursor: 'pointer', textAlign: 'center', padding: '4px 0',
+  },
+  optionBtn: {
+    display: 'flex', alignItems: 'center', gap: 14,
+    padding: '14px', background: '#F9FAFB', border: '1px solid #E5E7EB',
+    borderRadius: 12, cursor: 'pointer', textAlign: 'left',
+    transition: 'border-color 0.15s',
+  },
+  codeInput: {
+    width: '100%', padding: '14px', textAlign: 'center',
+    fontSize: 28, fontWeight: 700, letterSpacing: 12,
+    border: '2px solid #D1D5DB', borderRadius: 12,
+    outline: 'none', boxSizing: 'border-box', fontFamily: 'monospace',
+  },
+  input: {
+    width: '100%', padding: '11px 14px',
+    border: '1px solid #D1D5DB', borderRadius: 10,
+    fontSize: 14, outline: 'none', boxSizing: 'border-box',
+  },
+  secretBox: {
+    background: '#F9FAFB', border: '1px solid #E5E7EB', borderRadius: 8,
+    padding: '10px 14px', wordBreak: 'break-all' as const,
+    display: 'flex', justifyContent: 'center',
+  },
+  error: {
+    color: '#991B1B', background: '#FEE2E2',
+    padding: '8px 12px', borderRadius: 8, fontSize: 13, margin: 0,
+  },
+}
 ----- frontend/src/components/ui.tsx -----
 // Correção: Importação de tipos do React
 import type { CSSProperties, ReactNode } from 'react';
@@ -1504,6 +1588,106 @@ export default function QADashboard() {
     </div>
   )
 }
+----- frontend/src/hooks/useMFA.ts -----
+// frontend/src/hooks/useMFA.ts
+// Hook central para tudo relacionado a MFA e Google OAuth
+
+import { useState } from 'react'
+import api from '../api'
+
+export type MfaTipo = 'TOTP' | 'EMAIL'
+
+// ─── Tipos de retorno da API ──────────────────────────────────────────────────
+
+export interface MfaStatus {
+  mfa_ativo: boolean
+  mfa_tipo: MfaTipo | null
+}
+
+export interface SetupTotpResult {
+  secret: string
+  qrcode: string  // base64 PNG
+  uri: string
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
+export function useMFA() {
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+
+  const run = async <T>(fn: () => Promise<T>): Promise<T | null> => {
+    setError(null)
+    setLoading(true)
+    try {
+      return await fn()
+    } catch (err: any) {
+      const msg =
+        err?.response?.data?.error ||
+        err?.response?.data?.detail ||
+        err?.message ||
+        'Erro desconhecido'
+      setError(msg)
+      return null
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // ── Status ──────────────────────────────────────────────────────────────────
+  const getStatus = () =>
+    run<MfaStatus>(() => api.get('/mfa/status/').then(r => r.data))
+
+  // ── Setup TOTP ───────────────────────────────────────────────────────────────
+  const setupTotp = () =>
+    run<SetupTotpResult>(() => api.post('/mfa/setup/totp/').then(r => r.data))
+
+  const verifyTotp = (code: string) =>
+    run<{ message: string }>(() => api.post('/mfa/verify/totp/', { code }).then(r => r.data))
+
+  // ── Setup Email ──────────────────────────────────────────────────────────────
+  const setupEmail = () =>
+    run<{ message: string }>(() => api.post('/mfa/setup/email/').then(r => r.data))
+
+  const verifyEmail = (code: string) =>
+    run<{ message: string }>(() => api.post('/mfa/verify/email/', { code }).then(r => r.data))
+
+  // ── Challenge (login MFA) ────────────────────────────────────────────────────
+  const challenge = (mfa_token: string, code: string) =>
+    run<{ access: string; refresh: string }>(() =>
+      api.post('/mfa/challenge/', { mfa_token, code }).then(r => r.data)
+    )
+
+  const resendEmail = (mfa_token: string) =>
+    run<{ message: string }>(() => api.post('/mfa/resend-email/', { mfa_token }).then(r => r.data))
+
+  // ── Desativar ────────────────────────────────────────────────────────────────
+  const disable = (password: string) =>
+    run<{ message: string }>(() =>
+      api.delete('/mfa/disable/', { data: { password } }).then(r => r.data)
+    )
+
+  // ── Google OAuth ─────────────────────────────────────────────────────────────
+  const googleLogin = (id_token: string) =>
+    run<
+      | { access: string; refresh: string }
+      | { mfa_required: true; mfa_tipo: MfaTipo; mfa_token: string }
+    >(() => api.post('/auth/google/', { id_token }).then(r => r.data))
+
+  return {
+    loading,
+    error,
+    getStatus,
+    setupTotp,
+    verifyTotp,
+    setupEmail,
+    verifyEmail,
+    challenge,
+    resendEmail,
+    disable,
+    googleLogin,
+  }
+}
 ----- frontend/src/main.tsx -----
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
@@ -1880,83 +2064,498 @@ export const PRIORIDADE_COLOR: Record<Prioridade, { bg: string; text: string }> 
 };
 ----- frontend/src/views/AdminProjectsView.tsx -----
 import React, { useState, useEffect } from 'react';
-import { Search, Plus, Edit2, Trash2 } from 'lucide-react';
+import { Search, Plus, Edit2, Trash2, X, FolderOpen } from 'lucide-react';
 import api from '../api';
 import type { Projeto } from '../types';
 
+// ─── Modal de criação ─────────────────────────────────────────────────────────
+
+interface CreateProjectModalProps {
+  onClose: () => void;
+  onSuccess: (projeto: Projeto) => void;
+}
+
+function CreateProjectModal({ onClose, onSuccess }: CreateProjectModalProps) {
+  const [nome,     setNome]     = useState('');
+  const [descricao, setDescricao] = useState('');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+
+  const handleSubmit = async () => {
+    if (!nome.trim()) { setError('Nome é obrigatório.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.post<Projeto>('/projetos/', { nome: nome.trim(), descricao: descricao.trim() });
+      onSuccess(res.data);
+      onClose();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'Erro ao criar projeto.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed', inset: 0,
+    background: 'rgba(15, 23, 42, 0.45)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 50, padding: '1rem',
+  };
+
+  const modalStyle: React.CSSProperties = {
+    background: '#fff', borderRadius: 16,
+    boxShadow: '0 20px 60px rgba(0,0,0,0.15)',
+    width: '100%', maxWidth: 480,
+    display: 'flex', flexDirection: 'column',
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '10px 14px',
+    border: '1px solid #D1D5DB', borderRadius: 8,
+    fontSize: 14, color: '#111827', outline: 'none',
+    boxSizing: 'border-box', fontFamily: 'inherit',
+    transition: 'border-color 0.15s',
+  };
+
+  return (
+    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={modalStyle}>
+        {/* Header */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '1.25rem 1.5rem',
+          borderBottom: '1px solid #F3F4F6',
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div style={{
+              width: 36, height: 36, borderRadius: 10,
+              background: '#EFF6FF', display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <FolderOpen size={18} color="#2563EB" />
+            </div>
+            <div>
+              <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#111827' }}>Novo Projeto</h2>
+              <p style={{ margin: 0, fontSize: 12, color: '#6B7280' }}>Preencha os dados do projeto</p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4, borderRadius: 6 }}
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {error && (
+            <div style={{
+              padding: '10px 14px', borderRadius: 8, fontSize: 13,
+              background: '#FEE2E2', color: '#991B1B',
+            }}>{error}</div>
+          )}
+
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              Nome do projeto <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <input
+              style={inputStyle}
+              placeholder="Ex: Sistema de Gestão"
+              value={nome}
+              onChange={(e) => setNome(e.target.value)}
+              onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit(); }}
+              autoFocus
+            />
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              Descrição <span style={{ fontSize: 12, fontWeight: 400, color: '#9CA3AF' }}>(opcional)</span>
+            </label>
+            <textarea
+              style={{ ...inputStyle, height: 90, resize: 'none', lineHeight: 1.5 }}
+              placeholder="Descreva o objetivo do projeto..."
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{
+          display: 'flex', justifyContent: 'flex-end', gap: 10,
+          padding: '1rem 1.5rem',
+          borderTop: '1px solid #F3F4F6',
+        }}>
+          <button
+            onClick={onClose}
+            style={{
+              padding: '9px 18px', borderRadius: 8,
+              border: '1px solid #E5E7EB', background: '#fff',
+              color: '#374151', fontSize: 14, fontWeight: 500, cursor: 'pointer',
+            }}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleSubmit}
+            disabled={loading}
+            style={{
+              padding: '9px 18px', borderRadius: 8,
+              border: 'none',
+              background: loading ? '#93C5FD' : '#2563EB',
+              color: '#fff', fontSize: 14, fontWeight: 600,
+              cursor: loading ? 'not-allowed' : 'pointer',
+              display: 'flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {loading ? (
+              <>
+                <span style={{
+                  width: 14, height: 14, border: '2px solid rgba(255,255,255,0.4)',
+                  borderTop: '2px solid #fff', borderRadius: '50%',
+                  animation: 'spin 0.7s linear infinite', display: 'inline-block',
+                }} />
+                Criando...
+              </>
+            ) : (
+              <><Plus size={15} /> Criar projeto</>
+            )}
+          </button>
+        </div>
+      </div>
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ─── Modal de edição ──────────────────────────────────────────────────────────
+
+interface EditProjectModalProps {
+  projeto: Projeto;
+  onClose: () => void;
+  onSuccess: (projeto: Projeto) => void;
+}
+
+function EditProjectModal({ projeto, onClose, onSuccess }: EditProjectModalProps) {
+  const [nome,     setNome]     = useState(projeto.nome);
+  const [descricao, setDescricao] = useState(projeto.descricao ?? '');
+  const [loading,  setLoading]  = useState(false);
+  const [error,    setError]    = useState('');
+
+  const handleSubmit = async () => {
+    if (!nome.trim()) { setError('Nome é obrigatório.'); return; }
+    setLoading(true);
+    setError('');
+    try {
+      const res = await api.patch<Projeto>(`/projetos/${projeto.id}/`, {
+        nome: nome.trim(),
+        descricao: descricao.trim(),
+      });
+      onSuccess({ ...projeto, ...res.data, nome: nome.trim(), descricao: descricao.trim() });
+      onClose();
+    } catch (err: any) {
+      setError(err?.response?.data?.error ?? 'Erro ao editar projeto.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const overlayStyle: React.CSSProperties = {
+    position: 'fixed', inset: 0,
+    background: 'rgba(15, 23, 42, 0.45)',
+    display: 'flex', alignItems: 'center', justifyContent: 'center',
+    zIndex: 50, padding: '1rem',
+  };
+
+  const inputStyle: React.CSSProperties = {
+    width: '100%', padding: '10px 14px',
+    border: '1px solid #D1D5DB', borderRadius: 8,
+    fontSize: 14, color: '#111827', outline: 'none',
+    boxSizing: 'border-box', fontFamily: 'inherit',
+  };
+
+  return (
+    <div style={overlayStyle} onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.15)', width: '100%', maxWidth: 480 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '1.25rem 1.5rem', borderBottom: '1px solid #F3F4F6' }}>
+          <h2 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: '#111827' }}>Editar Projeto</h2>
+          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: '#9CA3AF', padding: 4 }}>
+            <X size={18} />
+          </button>
+        </div>
+
+        <div style={{ padding: '1.5rem', display: 'flex', flexDirection: 'column', gap: 16 }}>
+          {error && (
+            <div style={{ padding: '10px 14px', borderRadius: 8, fontSize: 13, background: '#FEE2E2', color: '#991B1B' }}>{error}</div>
+          )}
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>
+              Nome <span style={{ color: '#EF4444' }}>*</span>
+            </label>
+            <input style={inputStyle} value={nome} onChange={(e) => setNome(e.target.value)} autoFocus />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 6 }}>Descrição</label>
+            <textarea style={{ ...inputStyle, height: 80, resize: 'none', lineHeight: 1.5 }} value={descricao} onChange={(e) => setDescricao(e.target.value)} />
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, padding: '1rem 1.5rem', borderTop: '1px solid #F3F4F6' }}>
+          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid #E5E7EB', background: '#fff', color: '#374151', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+            Cancelar
+          </button>
+          <button onClick={handleSubmit} disabled={loading} style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: loading ? '#93C5FD' : '#2563EB', color: '#fff', fontSize: 14, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer' }}>
+            {loading ? 'Salvando...' : 'Salvar alterações'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Confirmação de exclusão ──────────────────────────────────────────────────
+
+interface DeleteConfirmProps {
+  projeto: Projeto;
+  onClose: () => void;
+  onConfirm: () => void;
+  loading: boolean;
+}
+
+function DeleteConfirm({ projeto, onClose, onConfirm, loading }: DeleteConfirmProps) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 50, padding: '1rem',
+    }}>
+      <div style={{ background: '#fff', borderRadius: 16, boxShadow: '0 20px 60px rgba(0,0,0,0.15)', width: '100%', maxWidth: 400, padding: '1.75rem' }}>
+        <div style={{ width: 44, height: 44, borderRadius: 12, background: '#FEE2E2', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: '1rem' }}>
+          <Trash2 size={20} color="#EF4444" />
+        </div>
+        <h3 style={{ margin: '0 0 6px', fontSize: 16, fontWeight: 700, color: '#111827' }}>Excluir projeto?</h3>
+        <p style={{ margin: '0 0 1.5rem', fontSize: 14, color: '#6B7280', lineHeight: 1.5 }}>
+          O projeto <strong style={{ color: '#111827' }}>{projeto.nome}</strong> e todas as suas sprints e tasks serão excluídos permanentemente. Essa ação não pode ser desfeita.
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+          <button onClick={onClose} style={{ padding: '9px 18px', borderRadius: 8, border: '1px solid #E5E7EB', background: '#fff', color: '#374151', fontSize: 14, fontWeight: 500, cursor: 'pointer' }}>
+            Cancelar
+          </button>
+          <button onClick={onConfirm} disabled={loading} style={{ padding: '9px 18px', borderRadius: 8, border: 'none', background: loading ? '#FCA5A5' : '#EF4444', color: '#fff', fontSize: 14, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer' }}>
+            {loading ? 'Excluindo...' : 'Sim, excluir'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── View principal ───────────────────────────────────────────────────────────
+
 export default function AdminProjectsView() {
-  const [projects, setProjects] = useState<Projeto[]>([]);
-  const [searchTerm, setSearchTerm] = useState("");
+  const [projects,    setProjects]    = useState<Projeto[]>([]);
+  const [searchTerm,  setSearchTerm]  = useState('');
+  const [loading,     setLoading]     = useState(true);
+
+  const [showCreate,  setShowCreate]  = useState(false);
+  const [editingProj, setEditingProj] = useState<Projeto | null>(null);
+  const [deletingProj, setDeletingProj] = useState<Projeto | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     api.get<Projeto[]>('/projetos/')
-      .then(res => setProjects(res.data))
-      .catch(console.error);
+      .then(res => { setProjects(res.data); setLoading(false); })
+      .catch(() => setLoading(false));
   }, []);
 
-  const filteredProjects = projects.filter(p => 
-    p.nome.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredProjects = projects.filter(p =>
+    p.nome.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    (p.descricao ?? '').toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const handleCreated = (novo: Projeto) => {
+    setProjects((prev) => [novo, ...prev]);
+  };
+
+  const handleEdited = (atualizado: Projeto) => {
+    setProjects((prev) => prev.map((p) => p.id === atualizado.id ? atualizado : p));
+  };
+
+  const handleDelete = async () => {
+    if (!deletingProj) return;
+    setDeleteLoading(true);
+    try {
+      await api.delete(`/projetos/${deletingProj.id}/`);
+      setProjects((prev) => prev.filter((p) => p.id !== deletingProj.id));
+      setDeletingProj(null);
+    } catch {
+      alert('Erro ao excluir projeto.');
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   return (
-    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col">
-      <div className="flex justify-between items-start mb-6">
+    <div style={{ padding: '2rem', maxWidth: 900, margin: '0 auto', height: '100%', display: 'flex', flexDirection: 'column', fontFamily: 'inherit' }}>
+      {/* Header */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '1.5rem' }}>
         <div>
-          <h1 className="text-2xl font-bold text-slate-900 mb-1">Gerenciamento de Projetos</h1>
-          <p className="text-gray-500 text-sm">Visão geral e controle de todos os projetos.</p>
+          <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: '#111827' }}>Projetos</h1>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#6B7280' }}>
+            {projects.length} projeto{projects.length !== 1 ? 's' : ''} no sistema
+          </p>
         </div>
-        <div className="flex space-x-3">
-          <div className="relative">
-            <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
-            <input 
-              type="text" 
-              className="pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm w-64 focus:ring-blue-500" 
+
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#9CA3AF', pointerEvents: 'none' }} />
+            <input
+              type="text"
+              style={{
+                paddingLeft: 32, paddingRight: 12, paddingTop: 8, paddingBottom: 8,
+                border: '1px solid #D1D5DB', borderRadius: 8,
+                fontSize: 13, color: '#111827', outline: 'none', width: 220,
+                fontFamily: 'inherit',
+              }}
               placeholder="Buscar projetos..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          {/* Botão Novo Projeto implementaria POST /api/projetos/ */}
-          <button className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center">
-            <Plus size={18} className="mr-2" /> Novo Projeto
+
+          <button
+            onClick={() => setShowCreate(true)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 6,
+              padding: '8px 16px', borderRadius: 8, border: 'none',
+              background: '#2563EB', color: '#fff',
+              fontSize: 14, fontWeight: 600, cursor: 'pointer',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Plus size={16} /> Novo Projeto
           </button>
         </div>
       </div>
 
-      <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
-        <div className="overflow-x-auto flex-1 p-2">
-          <table className="min-w-full">
-            <thead className="border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Nome do Projeto</th>
-                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Criado em</th>
-                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Ações</th>
+      {/* Tabela */}
+      <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E5E7EB', overflow: 'hidden', flex: 1 }}>
+        {loading ? (
+          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '4rem' }}>
+            <div style={{ width: 28, height: 28, border: '3px solid #E5E7EB', borderTop: '3px solid #3B82F6', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+            <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+          </div>
+        ) : (
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ background: '#F9FAFB', borderBottom: '1px solid #E5E7EB' }}>
+                {['Nome do Projeto', 'Descrição', 'Criado em', 'Ações'].map((h, i) => (
+                  <th key={h} style={{
+                    padding: '12px 20px', textAlign: i === 3 ? 'right' : 'left',
+                    fontSize: 11, fontWeight: 600, color: '#6B7280',
+                    textTransform: 'uppercase', letterSpacing: 0.5,
+                  }}>{h}</th>
+                ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-gray-100">
+            <tbody>
               {filteredProjects.map((project) => (
-                <tr key={project.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 text-sm font-semibold text-slate-800">
-                    <div className="flex items-center">
-                      <div className="w-1 h-6 rounded-sm mr-3 bg-green-500"></div>
-                      {project.nome}
+                <tr
+                  key={project.id}
+                  style={{ borderBottom: '1px solid #F3F4F6', transition: 'background 0.1s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = '#F9FAFB')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <td style={{ padding: '14px 20px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <div style={{ width: 3, height: 28, borderRadius: 99, background: '#3B82F6', flexShrink: 0 }} />
+                      <span style={{ fontWeight: 600, fontSize: 14, color: '#111827' }}>{project.nome}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-sm text-gray-600">
-                    {project.criado_em ? new Date(project.criado_em).toLocaleDateString() : '-'}
+                  <td style={{ padding: '14px 20px', fontSize: 13, color: '#6B7280', maxWidth: 260 }}>
+                    <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block' }}>
+                      {project.descricao || <span style={{ color: '#D1D5DB', fontStyle: 'italic' }}>Sem descrição</span>}
+                    </span>
                   </td>
-                  <td className="px-6 py-4 text-right text-sm font-medium">
-                    <div className="flex justify-end space-x-2">
-                      <button className="text-gray-400 hover:text-blue-600 p-1"><Edit2 size={16} /></button>
-                      <button className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                  <td style={{ padding: '14px 20px', fontSize: 13, color: '#9CA3AF', whiteSpace: 'nowrap' }}>
+                    {project.criado_em
+                      ? new Date(project.criado_em).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short', year: 'numeric' })
+                      : '—'}
+                  </td>
+                  <td style={{ padding: '14px 20px', textAlign: 'right' }}>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 4 }}>
+                      <button
+                        onClick={() => setEditingProj(project)}
+                        title="Editar"
+                        style={{ background: 'none', border: '1px solid transparent', borderRadius: 6, padding: 6, cursor: 'pointer', color: '#9CA3AF', display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#2563EB'; e.currentTarget.style.borderColor = '#DBEAFE'; e.currentTarget.style.background = '#EFF6FF'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = '#9CA3AF'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'none'; }}
+                      >
+                        <Edit2 size={15} />
+                      </button>
+                      <button
+                        onClick={() => setDeletingProj(project)}
+                        title="Excluir"
+                        style={{ background: 'none', border: '1px solid transparent', borderRadius: 6, padding: 6, cursor: 'pointer', color: '#9CA3AF', display: 'flex', alignItems: 'center', transition: 'all 0.15s' }}
+                        onMouseEnter={(e) => { e.currentTarget.style.color = '#EF4444'; e.currentTarget.style.borderColor = '#FEE2E2'; e.currentTarget.style.background = '#FFF5F5'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.color = '#9CA3AF'; e.currentTarget.style.borderColor = 'transparent'; e.currentTarget.style.background = 'none'; }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
+
+              {filteredProjects.length === 0 && !loading && (
+                <tr>
+                  <td colSpan={4} style={{ padding: '3rem', textAlign: 'center' }}>
+                    <div style={{ color: '#9CA3AF', fontSize: 13 }}>
+                      {searchTerm ? `Nenhum projeto encontrado para "${searchTerm}"` : 'Nenhum projeto cadastrado ainda.'}
+                    </div>
+                    {!searchTerm && (
+                      <button
+                        onClick={() => setShowCreate(true)}
+                        style={{ marginTop: 12, padding: '8px 16px', borderRadius: 8, border: 'none', background: '#EFF6FF', color: '#2563EB', fontSize: 13, fontWeight: 600, cursor: 'pointer' }}
+                      >
+                        + Criar primeiro projeto
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
-        </div>
+        )}
       </div>
+
+      {/* Modais */}
+      {showCreate && (
+        <CreateProjectModal
+          onClose={() => setShowCreate(false)}
+          onSuccess={handleCreated}
+        />
+      )}
+
+      {editingProj && (
+        <EditProjectModal
+          projeto={editingProj}
+          onClose={() => setEditingProj(null)}
+          onSuccess={handleEdited}
+        />
+      )}
+
+      {deletingProj && (
+        <DeleteConfirm
+          projeto={deletingProj}
+          onClose={() => setDeletingProj(null)}
+          onConfirm={handleDelete}
+          loading={deleteLoading}
+        />
+      )}
     </div>
   );
 }
@@ -2345,7 +2944,106 @@ class EmailBackend(BaseBackend):
             return Usuario.objects.get(pk=user_id)
         except Usuario.DoesNotExist:
             return None
+----- backend/api/mfa_utils.py -----
+# backend/api/mfa_utils.py
+"""
+Utilitários para MFA:
+  - Envio de OTP por e-mail
+  - Geração e verificação do mfa_token (JWT temporário de 5 min)
+  - Geração de QR code base64 para TOTP
+"""
+
+import jwt
+import qrcode
+import io
+import base64
+from datetime import datetime, timedelta, timezone
+
+from django.conf import settings
+from django.core.mail import send_mail
+
+
+# ─── MFA TOKEN (JWT temporário) ───────────────────────────────────────────────
+# Esse token é emitido no lugar dos tokens definitivos quando MFA está ativo.
+# O frontend usa ele para chamar /api/mfa/challenge/ e só então recebe o JWT real.
+
+MFA_TOKEN_TTL_MINUTES = 5
+MFA_TOKEN_CLAIM = 'mfa_pending'
+
+
+def gerar_mfa_token(user_id: int) -> str:
+    """
+    Gera um JWT de curta duração (5 min) sinalizando que o usuário passou
+    na senha mas ainda precisa do segundo fator.
+    """
+    payload = {
+        'user_id': user_id,
+        MFA_TOKEN_CLAIM: True,
+        'exp': datetime.now(tz=timezone.utc) + timedelta(minutes=MFA_TOKEN_TTL_MINUTES),
+        'iat': datetime.now(tz=timezone.utc),
+    }
+    return jwt.encode(payload, settings.SECRET_KEY, algorithm='HS256')
+
+
+def verificar_mfa_token(token: str) -> int | None:
+    """
+    Decodifica e valida o mfa_token.
+    Retorna o user_id em caso de sucesso, None em caso de falha/expirado.
+    """
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=['HS256'])
+        if not payload.get(MFA_TOKEN_CLAIM):
+            return None
+        return payload.get('user_id')
+    except jwt.ExpiredSignatureError:
+        return None
+    except jwt.InvalidTokenError:
+        return None
+
+
+# ─── EMAIL OTP ────────────────────────────────────────────────────────────────
+
+def enviar_otp_email(usuario) -> None:
+    """
+    Gera um OTP de 6 dígitos, salva no usuário e envia por e-mail.
+    Levanta exceção se o envio falhar (deixa a view tratar).
+    """
+    code = usuario.gerar_otp_email()
+
+    send_mail(
+        subject='Seu código de verificação — Lazuli',
+        message=(
+            f'Olá, {usuario.nome}!\n\n'
+            f'Seu código de verificação é: {code}\n\n'
+            f'Ele expira em 10 minutos.\n\n'
+            f'Se você não solicitou este código, ignore este e-mail.'
+        ),
+        from_email=settings.DEFAULT_FROM_EMAIL,
+        recipient_list=[usuario.email],
+        fail_silently=False,
+    )
+
+
+# ─── QR CODE TOTP ─────────────────────────────────────────────────────────────
+
+def gerar_qrcode_base64(uri: str) -> str:
+    """
+    Converte um otpauth:// URI em uma imagem PNG base64
+    pronta para ser usada em <img src="data:image/png;base64,...">
+    """
+    qr = qrcode.QRCode(box_size=8, border=2)
+    qr.add_data(uri)
+    qr.make(fit=True)
+    img = qr.make_image(fill_color='black', back_color='white')
+
+    buffer = io.BytesIO()
+    img.save(buffer, format='PNG')
+    buffer.seek(0)
+    return base64.b64encode(buffer.read()).decode('utf-8')
 ----- backend/api/models.py -----
+# backend/api/models.py
+
+
 from django.db import models
 
 
@@ -2355,7 +3053,7 @@ class Cargo(models.Model):
 
     class Meta:
         db_table = 'cargos'
-        managed = False  # Importante: O Django não vai tentar criar/migrar esta tabela
+        managed = False
 
     def __str__(self):
         return self.nome
@@ -2365,40 +3063,96 @@ class Usuario(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=120)
     email = models.CharField(max_length=150, unique=True)
-    senha = models.CharField(max_length=255) # Mapeia a coluna 'senha' do seu SQL
-    
-    # Chaves Estrangeiras
+    senha = models.CharField(max_length=255, blank=True)  # blank=True → usuários Google podem não ter senha
+
     cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT, db_column='cargo_id')
-    convidado_por = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, db_column='convidado_por')
-    
+    convidado_por = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, db_column='convidado_por')
+
     ativo = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 
-    # --- NOVA ADIÇÃO ---
-    @property
-    def is_authenticated(self):
-        """
-        Otimização para o Django Rest Framework e SimpleJWT.
-        Indica que qualquer instância carregada deste modelo é um usuário 
-        autenticado válido (desde que exista no banco).
-        """
-        return True
-    # ---------------------
+    # ── MFA ──────────────────────────────────────────────────────────────────
+    mfa_ativo   = models.BooleanField(default=False)
+    mfa_tipo    = models.CharField(
+        max_length=10, null=True, blank=True,
+        choices=[('TOTP', 'Authenticator App'), ('EMAIL', 'E-mail OTP')],
+    )
+    totp_secret = models.CharField(max_length=64,  null=True, blank=True)
+
+    # OTP por e-mail (armazenado temporariamente, limpo após uso)
+    otp_code      = models.CharField(max_length=8,  null=True, blank=True)
+    otp_expira_em = models.DateTimeField(null=True, blank=True)
+
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    google_id = models.CharField(max_length=128, null=True, blank=True, unique=True)
 
     class Meta:
         db_table = 'usuarios'
-        managed = False # Importante: O Django não vai tentar criar/migrar esta tabela
+        managed = False
 
-    # Métodos auxiliares para simular comportamento de usuário do Django
+    @property
+    def is_authenticated(self):
+        return True
+
     def set_password(self, raw_password):
-        """Criptografa a senha antes de salvar"""
         from django.contrib.auth.hashers import make_password
         self.senha = make_password(raw_password)
 
     def check_password(self, raw_password):
-        """Verifica se a senha bate com o hash no banco"""
         from django.contrib.auth.hashers import check_password
         return check_password(raw_password, self.senha)
+
+    # ── Helpers MFA ───────────────────────────────────────────────────────────
+
+    def gerar_totp_secret(self):
+        """Gera e salva um novo secret TOTP (não ativa o MFA ainda)."""
+        import pyotp
+        self.totp_secret = pyotp.random_base32()
+        self.save(update_fields=['totp_secret'])
+        return self.totp_secret
+
+    def verificar_totp(self, code: str) -> bool:
+        """Verifica código TOTP com janela de 1 período (±30 s)."""
+        if not self.totp_secret:
+            return False
+        import pyotp
+        totp = pyotp.TOTP(self.totp_secret)
+        return totp.verify(code, valid_window=1)
+
+    def gerar_otp_email(self) -> str:
+        """Gera OTP numérico de 6 dígitos válido por 10 minutos."""
+        import random
+        from django.utils import timezone
+        from datetime import timedelta
+        code = f"{random.randint(0, 999999):06d}"
+        self.otp_code = code
+        self.otp_expira_em = timezone.now() + timedelta(minutes=10)
+        self.save(update_fields=['otp_code', 'otp_expira_em'])
+        return code
+
+    def verificar_otp_email(self, code: str) -> bool:
+        """Verifica OTP de e-mail e o invalida após uso correto."""
+        from django.utils import timezone
+        if not self.otp_code or not self.otp_expira_em:
+            return False
+        if timezone.now() > self.otp_expira_em:
+            return False
+        if self.otp_code != code:
+            return False
+        # Invalida após uso
+        self.otp_code = None
+        self.otp_expira_em = None
+        self.save(update_fields=['otp_code', 'otp_expira_em'])
+        return True
+
+    def get_totp_uri(self, issuer: str = 'Lazuli') -> str:
+        """Retorna o URI otpauth:// para gerar o QR code."""
+        import pyotp
+        totp = pyotp.TOTP(self.totp_secret)
+        return totp.provisioning_uri(name=self.email, issuer_name=issuer)
+
+
+# ─── Restante dos modelos (inalterados) ───────────────────────────────────────
 
 class ConviteSistema(models.Model):
     id = models.AutoField(primary_key=True)
@@ -2434,8 +3188,6 @@ class ProjetoParticipante(models.Model):
 
     class Meta:
         db_table = 'projeto_participantes'
-        # O Django cria unique_together automaticamente para o PK composto se não tiver PK explícito,
-        # mas aqui temos o 'id' explícito. Vamos forçar a unicidade do par.
         constraints = [
             models.UniqueConstraint(fields=['projeto', 'usuario'], name='unique_projeto_usuario')
         ]
@@ -2497,8 +3249,8 @@ class Task(models.Model):
     responsavel = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column='responsavel_id', related_name='tasks_responsavel')
     criado_em = models.DateTimeField(auto_now_add=True)
     story_points = models.IntegerField(null=True, blank=True)
-    due_date = models.DateField(null=True, blank=True) 
-    tags = models.CharField(max_length=255, blank=True, null=True) 
+    due_date = models.DateField(null=True, blank=True)
+    tags = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
         db_table = 'tasks'
@@ -2535,7 +3287,6 @@ class Comentario(models.Model):
 
 
 class TaskHistorico(models.Model):
-    # Enums copiados da Task para referência
     class StatusChoices(models.TextChoices):
         BACKLOG = 'BACKLOG', 'Backlog'
         TODO = 'TODO', 'To Do'
@@ -2571,7 +3322,7 @@ class Notificacao(models.Model):
     sprint = models.ForeignKey(Sprint, on_delete=models.SET_NULL, null=True, blank=True, db_column='sprint_id')
 
     class Meta:
-        db_table = 'notificacoes'    
+        db_table = 'notificacoes'
 ----- backend/api/serializers.py -----
 # backend/api/serializers.py
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
@@ -2601,33 +3352,60 @@ from django.test import TestCase
 # backend/api/urls.py
 from django.urls import path
 from . import views
+from .views_mfa import (
+    google_login,
+    mfa_status,
+    mfa_setup_totp,
+    mfa_verify_totp,
+    mfa_setup_email,
+    mfa_verify_email,
+    mfa_challenge,
+    mfa_resend_email,
+    mfa_disable,
+)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
-    # Auth
-    path('register/', views.register, name='register'),
-    path('profile/', views.profile, name='profile'),
-    path('token/', views.custom_token_obtain, name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
- 
-    # Projetos
-    path('projetos/', views.projetos_list, name='projetos_list'),
-    path('projetos/<int:pk>/', views.projeto_detail, name='projeto_detail'),
- 
-    # Sprints
-    path('sprints/', views.sprints_list, name='sprints_list'),
- 
-    # Tasks
-    path('tasks/', views.tasks_list, name='tasks_list'),
-    path('tasks/minhas/', views.tasks_minhas, name='tasks_minhas'),
-    path('tasks/<int:pk>/', views.task_detail, name='task_detail'),
- 
-    # Admin
-    path('admin/stats/', views.admin_stats, name='admin_stats'),
-    path('admin/usuarios/', views.admin_usuarios, name='admin_usuarios'),
+    # ── Auth ──────────────────────────────────────────────────────────────────
+    path('register/',       views.register,             name='register'),
+    path('profile/',        views.profile,              name='profile'),
+    path('token/',          views.custom_token_obtain,  name='token_obtain'),
+    path('token/refresh/',  TokenRefreshView.as_view(), name='token_refresh'),
+
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    path('auth/google/',    google_login,               name='google_login'),
+
+    # ── MFA ───────────────────────────────────────────────────────────────────
+    path('mfa/status/',         mfa_status,         name='mfa_status'),
+    path('mfa/challenge/',      mfa_challenge,      name='mfa_challenge'),
+    path('mfa/resend-email/',   mfa_resend_email,   name='mfa_resend_email'),
+    path('mfa/disable/',        mfa_disable,        name='mfa_disable'),
+    # TOTP
+    path('mfa/setup/totp/',     mfa_setup_totp,     name='mfa_setup_totp'),
+    path('mfa/verify/totp/',    mfa_verify_totp,    name='mfa_verify_totp'),
+    # Email OTP
+    path('mfa/setup/email/',    mfa_setup_email,    name='mfa_setup_email'),
+    path('mfa/verify/email/',   mfa_verify_email,   name='mfa_verify_email'),
+
+    # ── Projetos ──────────────────────────────────────────────────────────────
+    path('projetos/',           views.projetos_list,    name='projetos_list'),
+    path('projetos/<int:pk>/',  views.projeto_detail,   name='projeto_detail'),
+
+    # ── Sprints ───────────────────────────────────────────────────────────────
+    path('sprints/',            views.sprints_list,     name='sprints_list'),
+
+    # ── Tasks ─────────────────────────────────────────────────────────────────
+    path('tasks/',              views.tasks_list,       name='tasks_list'),
+    path('tasks/minhas/',       views.tasks_minhas,     name='tasks_minhas'),
+    path('tasks/<int:pk>/',     views.task_detail,      name='task_detail'),
+
+    # ── Admin ─────────────────────────────────────────────────────────────────
+    path('admin/stats/',        views.admin_stats,      name='admin_stats'),
+    path('admin/usuarios/',     views.admin_usuarios,   name='admin_usuarios'),
 ]
 ----- backend/api/views.py -----
 # backend/api/views.py
+# Substitui o arquivo existente — adiciona suporte a MFA no login normal
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -2637,6 +3415,26 @@ from django.contrib.auth import authenticate
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Usuario, Cargo, Projeto, ProjetoParticipante, Sprint, Task, Backlog
+from .mfa_utils import gerar_mfa_token, enviar_otp_email
+
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+def _emitir_tokens(user: Usuario) -> dict:
+    refresh = RefreshToken.for_user(user)
+    return {
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+    }
+
+
+def _resposta_mfa_pendente(user: Usuario) -> Response:
+    mfa_token = gerar_mfa_token(user.id)
+    return Response({
+        'mfa_required': True,
+        'mfa_tipo':  user.mfa_tipo,
+        'mfa_token': mfa_token,
+    }, status=status.HTTP_200_OK)
 
 
 # ─── AUTH ─────────────────────────────────────────────────────────────────────
@@ -2644,9 +3442,9 @@ from .models import Usuario, Cargo, Projeto, ProjetoParticipante, Sprint, Task, 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
-    email = request.data.get('email')
-    password = request.data.get('password')
-    nome = request.data.get('nome')
+    email     = request.data.get('email')
+    password  = request.data.get('password')
+    nome      = request.data.get('nome')
     cargo_nome = request.data.get('cargo', 'DEV').upper()
 
     if not email or not password:
@@ -2665,7 +3463,7 @@ def register(request):
             nome=nome or email.split('@')[0],
             email=email,
             cargo=cargo_obj,
-            ativo=True
+            ativo=True,
         )
         user.set_password(password)
         user.save()
@@ -2677,7 +3475,12 @@ def register(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def custom_token_obtain(request):
-    email = request.data.get('email')
+    """
+    Login com email + senha.
+    Se MFA ativo → retorna mfa_token (segundo fator obrigatório).
+    Se não        → retorna access + refresh diretamente.
+    """
+    email    = request.data.get('email')
     password = request.data.get('password')
 
     if not email or not password:
@@ -2685,14 +3488,22 @@ def custom_token_obtain(request):
 
     user = authenticate(request, email=email, password=password)
 
-    if user is not None:
-        refresh = RefreshToken.for_user(user)
-        return Response({
-            'refresh': str(refresh),
-            'access': str(refresh.access_token),
-        })
-    else:
+    if user is None:
         return Response({'detail': 'Credenciais inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # MFA ativo → precisa do segundo fator
+    if user.mfa_ativo:
+        if user.mfa_tipo == 'EMAIL':
+            try:
+                enviar_otp_email(user)
+            except Exception:
+                return Response(
+                    {'detail': 'Falha ao enviar código MFA por e-mail.'},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                )
+        return _resposta_mfa_pendente(user)
+
+    return Response(_emitir_tokens(user))
 
 
 @api_view(['GET'])
@@ -2700,10 +3511,13 @@ def custom_token_obtain(request):
 def profile(request):
     user = request.user
     return Response({
-        'id': user.id,
+        'id':       user.id,
         'username': user.nome,
-        'email': user.email,
-        'cargo': user.cargo.nome,
+        'email':    user.email,
+        'cargo':    user.cargo.nome,
+        'mfa_ativo': user.mfa_ativo,
+        'mfa_tipo':  user.mfa_tipo,
+        'tem_google': bool(user.google_id),
     })
 
 
@@ -2717,22 +3531,15 @@ def projetos_list(request):
 
     if request.method == 'GET':
         if cargo_nome == 'ADMIN':
-            # Admin vê todos os projetos
             projetos = Projeto.objects.all().order_by('-criado_em')
         else:
-            # Outros veem apenas os que participam
             participacoes = ProjetoParticipante.objects.filter(
                 usuario=user
             ).values_list('projeto_id', flat=True)
             projetos = Projeto.objects.filter(id__in=participacoes).order_by('-criado_em')
 
         data = [
-            {
-                'id': p.id,
-                'nome': p.nome,
-                'descricao': p.descricao,
-                'criado_em': p.criado_em,
-            }
+            {'id': p.id, 'nome': p.nome, 'descricao': p.descricao, 'criado_em': p.criado_em}
             for p in projetos
         ]
         return Response(data)
@@ -2741,28 +3548,16 @@ def projetos_list(request):
         if cargo_nome not in ('ADMIN', 'GERENTE'):
             return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
 
-        nome = request.data.get('nome')
+        nome     = request.data.get('nome')
         descricao = request.data.get('descricao', '')
 
         if not nome:
             return Response({'error': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
-            projeto = Projeto.objects.create(
-                nome=nome,
-                descricao=descricao,
-                criado_por=user,
-            )
-            # Cria o backlog automaticamente
+            projeto = Projeto.objects.create(nome=nome, descricao=descricao, criado_por=user)
             Backlog.objects.create(projeto=projeto, nome='Backlog Principal')
-
-            # Adiciona o criador como participante
-            ProjetoParticipante.objects.create(
-                projeto=projeto,
-                usuario=user,
-                convidado_por=user,
-            )
-
+            ProjetoParticipante.objects.create(projeto=projeto, usuario=user, convidado_por=user)
             return Response({'id': projeto.id, 'nome': projeto.nome}, status=status.HTTP_201_CREATED)
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
@@ -2777,12 +3572,7 @@ def projeto_detail(request, pk):
         return Response({'error': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     if request.method == 'GET':
-        return Response({
-            'id': projeto.id,
-            'nome': projeto.nome,
-            'descricao': projeto.descricao,
-            'criado_em': projeto.criado_em,
-        })
+        return Response({'id': projeto.id, 'nome': projeto.nome, 'descricao': projeto.descricao, 'criado_em': projeto.criado_em})
 
     if request.method == 'PATCH':
         if 'nome' in request.data:
@@ -2824,18 +3614,13 @@ def sprints_list(request):
         data = []
         for s in sprints:
             total_tasks = Task.objects.filter(sprint=s).count()
-            concluidas = Task.objects.filter(sprint=s, status='CONCLUIDO').count()
-            progresso = (concluidas / total_tasks * 100) if total_tasks > 0 else 0
-
+            concluidas  = Task.objects.filter(sprint=s, status='CONCLUIDO').count()
+            progresso   = (concluidas / total_tasks * 100) if total_tasks > 0 else 0
             data.append({
-                'id': s.id,
-                'nome': s.nome,
-                'status': s.status,
-                'data_inicio': s.data_inicio,
-                'data_fim': s.data_fim,
+                'id': s.id, 'nome': s.nome, 'status': s.status,
+                'data_inicio': s.data_inicio, 'data_fim': s.data_fim,
                 'projeto_id': s.projeto_id,
-                'total_tasks': total_tasks,
-                'concluidas': concluidas,
+                'total_tasks': total_tasks, 'concluidas': concluidas,
                 'progresso': round(progresso, 1),
             })
 
@@ -2846,16 +3631,15 @@ def sprints_list(request):
             return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
 
         projeto_id = request.data.get('projeto_id')
-        nome = request.data.get('nome')
+        nome       = request.data.get('nome')
 
         if not projeto_id or not nome:
             return Response({'error': 'projeto_id e nome são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
 
         try:
             projeto = Projeto.objects.get(pk=projeto_id)
-            sprint = Sprint.objects.create(
-                projeto=projeto,
-                nome=nome,
+            sprint  = Sprint.objects.create(
+                projeto=projeto, nome=nome,
                 data_inicio=request.data.get('data_inicio'),
                 data_fim=request.data.get('data_fim'),
                 status=request.data.get('status', 'PLANEJADA'),
@@ -2878,8 +3662,8 @@ def tasks_list(request):
 
     if request.method == 'GET':
         status_filter = request.query_params.get('status')
-        projeto_id = request.query_params.get('projeto_id')
-        sprint_id = request.query_params.get('sprint_id')
+        projeto_id    = request.query_params.get('projeto_id')
+        sprint_id     = request.query_params.get('sprint_id')
 
         if cargo_nome == 'ADMIN':
             tasks = Task.objects.all()
@@ -2900,15 +3684,11 @@ def tasks_list(request):
 
         data = [
             {
-                'id': t.id,
-                'titulo': t.titulo,
-                'descricao': t.descricao,
-                'status': t.status,
-                'prioridade': t.prioridade,
+                'id': t.id, 'titulo': t.titulo, 'descricao': t.descricao,
+                'status': t.status, 'prioridade': t.prioridade,
                 'responsavel_id': t.responsavel_id,
                 'responsavel_nome': t.responsavel.nome if t.responsavel else None,
-                'sprint_id': t.sprint_id,
-                'projeto_id': t.projeto_id,
+                'sprint_id': t.sprint_id, 'projeto_id': t.projeto_id,
                 'criado_em': t.criado_em,
             }
             for t in tasks
@@ -2917,7 +3697,7 @@ def tasks_list(request):
 
     elif request.method == 'POST':
         projeto_id = request.data.get('projeto_id')
-        titulo = request.data.get('titulo')
+        titulo     = request.data.get('titulo')
 
         if not projeto_id or not titulo:
             return Response({'error': 'projeto_id e titulo são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -2925,10 +3705,8 @@ def tasks_list(request):
         try:
             projeto = Projeto.objects.get(pk=projeto_id)
             backlog = Backlog.objects.get(projeto=projeto)
-            task = Task.objects.create(
-                projeto=projeto,
-                backlog=backlog,
-                titulo=titulo,
+            task    = Task.objects.create(
+                projeto=projeto, backlog=backlog, titulo=titulo,
                 descricao=request.data.get('descricao', ''),
                 status=request.data.get('status', 'BACKLOG'),
                 prioridade=request.data.get('prioridade', 'MEDIA'),
@@ -2953,30 +3731,18 @@ def task_detail(request, pk):
 
     if request.method == 'GET':
         return Response({
-            'id': task.id,
-            'titulo': task.titulo,
-            'descricao': task.descricao,
-            'status': task.status,
-            'prioridade': task.prioridade,
+            'id': task.id, 'titulo': task.titulo, 'descricao': task.descricao,
+            'status': task.status, 'prioridade': task.prioridade,
             'responsavel_nome': task.responsavel.nome if task.responsavel else None,
-            'sprint_id': task.sprint_id,
-            'projeto_id': task.projeto_id,
+            'sprint_id': task.sprint_id, 'projeto_id': task.projeto_id,
             'criado_em': task.criado_em,
         })
 
     if request.method == 'PATCH':
-        if 'status' in request.data:
-            task.status = request.data['status']
-        if 'prioridade' in request.data:
-            task.prioridade = request.data['prioridade']
-        if 'titulo' in request.data:
-            task.titulo = request.data['titulo']
-        if 'descricao' in request.data:
-            task.descricao = request.data['descricao']
-        if 'responsavel_id' in request.data:
-            task.responsavel_id = request.data['responsavel_id']
-        if 'sprint_id' in request.data:
-            task.sprint_id = request.data['sprint_id']
+        fields = ['status', 'prioridade', 'titulo', 'descricao', 'responsavel_id', 'sprint_id']
+        for field in fields:
+            if field in request.data:
+                setattr(task, field, request.data[field])
         task.save()
         return Response({'id': task.id, 'status': task.status})
 
@@ -2988,41 +3754,28 @@ def task_detail(request, pk):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def tasks_minhas(request):
-    """Tasks onde o usuário autenticado é responsável."""
-    user = request.user
+    user  = request.user
     tasks = Task.objects.filter(responsavel=user).select_related('responsavel').order_by('-criado_em')
-
-    data = [
-        {
-            'id': t.id,
-            'titulo': t.titulo,
-            'status': t.status,
-            'prioridade': t.prioridade,
-            'sprint_id': t.sprint_id,
-            'projeto_id': t.projeto_id,
-        }
+    data  = [
+        {'id': t.id, 'titulo': t.titulo, 'status': t.status,
+         'prioridade': t.prioridade, 'sprint_id': t.sprint_id, 'projeto_id': t.projeto_id}
         for t in tasks
     ]
     return Response(data)
 
 
-# ─── ADMIN STATS ──────────────────────────────────────────────────────────────
+# ─── ADMIN ────────────────────────────────────────────────────────────────────
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_stats(request):
-    user = request.user
-    if user.cargo.nome != 'ADMIN':
+    if request.user.cargo.nome != 'ADMIN':
         return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
 
-    total_usuarios = Usuario.objects.filter(ativo=True).count()
-    total_projetos = Projeto.objects.count()
-    sprints_ativas = Sprint.objects.filter(status='ATIVA').count()
-
     return Response({
-        'total_usuarios': total_usuarios,
-        'total_projetos': total_projetos,
-        'sprints_ativas': sprints_ativas,
+        'total_usuarios':    Usuario.objects.filter(ativo=True).count(),
+        'total_projetos':    Projeto.objects.count(),
+        'sprints_ativas':    Sprint.objects.filter(status='ATIVA').count(),
         'convites_pendentes': 0,
     })
 
@@ -3030,23 +3783,394 @@ def admin_stats(request):
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
 def admin_usuarios(request):
-    user = request.user
-    if user.cargo.nome != 'ADMIN':
+    if request.user.cargo.nome != 'ADMIN':
         return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
 
     usuarios = Usuario.objects.select_related('cargo').all().order_by('-criado_em')
     data = [
-        {
-            'id': u.id,
-            'nome': u.nome,
-            'email': u.email,
-            'cargo': u.cargo.nome,
-            'ativo': u.ativo,
-            'criado_em': u.criado_em,
-        }
+        {'id': u.id, 'nome': u.nome, 'email': u.email,
+         'cargo': u.cargo.nome, 'ativo': u.ativo, 'criado_em': u.criado_em}
         for u in usuarios
     ]
     return Response(data)
+----- backend/api/views_mfa.py -----
+# backend/api/views_mfa.py
+"""
+Views de MFA e Google OAuth.
+Importe e registre em urls.py:
+
+    from .views_mfa import (
+        google_login,
+        mfa_status,
+        mfa_setup_totp,
+        mfa_verify_totp,
+        mfa_setup_email,
+        mfa_verify_email,
+        mfa_challenge,
+        mfa_disable,
+    )
+"""
+
+import requests as http_requests
+
+from django.conf import settings
+from django.contrib.auth import authenticate
+
+from rest_framework.decorators import api_view, permission_classes
+from rest_framework.permissions import IsAuthenticated, AllowAny
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+
+from .models import Usuario, Cargo
+from .mfa_utils import (
+    gerar_mfa_token,
+    verificar_mfa_token,
+    enviar_otp_email,
+    gerar_qrcode_base64,
+)
+
+
+# ─── Helpers internos ─────────────────────────────────────────────────────────
+
+def _emitir_tokens(user: Usuario) -> dict:
+    """Retorna o par access/refresh definitivos para um usuário."""
+    refresh = RefreshToken.for_user(user)
+    return {
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+    }
+
+
+def _resposta_mfa_pendente(user: Usuario) -> Response:
+    """
+    Retorna a resposta padrão quando o usuário passou na senha mas ainda
+    precisa completar o segundo fator.
+    """
+    mfa_token = gerar_mfa_token(user.id)
+    return Response({
+        'mfa_required': True,
+        'mfa_tipo': user.mfa_tipo,       # 'TOTP' | 'EMAIL'
+        'mfa_token': mfa_token,           # usado em /api/mfa/challenge/
+    }, status=status.HTTP_200_OK)
+
+
+# ─── GOOGLE OAUTH ─────────────────────────────────────────────────────────────
+
+GOOGLE_TOKENINFO_URL = 'https://oauth2.googleapis.com/tokeninfo'
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def google_login(request):
+    """
+    Recebe o id_token emitido pelo Google no frontend,
+    valida com a API do Google e autentica / cria o usuário.
+
+    Body: { "id_token": "<token do Google>" }
+    """
+    id_token = request.data.get('id_token')
+    if not id_token:
+        return Response({'error': 'id_token é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── 1. Valida o token com o Google ────────────────────────────────────────
+    try:
+        resp = http_requests.get(
+            GOOGLE_TOKENINFO_URL,
+            params={'id_token': id_token},
+            timeout=5,
+        )
+        info = resp.json()
+    except Exception:
+        return Response({'error': 'Falha ao contatar o Google.'}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+    if resp.status_code != 200 or 'error' in info:
+        return Response({'error': 'Token do Google inválido.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    # ── 2. Verifica o audience (client_id da sua aplicação) ───────────────────
+    google_client_id = getattr(settings, 'GOOGLE_CLIENT_ID', None)
+    if google_client_id and info.get('aud') != google_client_id:
+        return Response({'error': 'Token não pertence a esta aplicação.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    google_id = info.get('sub')          # ID único do Google
+    email     = info.get('email', '')
+    nome      = info.get('name', email.split('@')[0])
+
+    if not google_id or not email:
+        return Response({'error': 'Dados insuficientes retornados pelo Google.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── 3. Acha ou cria o usuário ─────────────────────────────────────────────
+    user = None
+
+    # Tenta achar pelo google_id primeiro (login recorrente)
+    try:
+        user = Usuario.objects.get(google_id=google_id)
+    except Usuario.DoesNotExist:
+        pass
+
+    # Tenta achar pelo email (usuário pode já existir com senha)
+    if user is None:
+        try:
+            user = Usuario.objects.get(email=email)
+            # Vincula o google_id a esse usuário existente
+            user.google_id = google_id
+            user.save(update_fields=['google_id'])
+        except Usuario.DoesNotExist:
+            pass
+
+    # Cria novo usuário
+    if user is None:
+        try:
+            cargo_dev = Cargo.objects.get(nome='DEV')
+        except Cargo.DoesNotExist:
+            return Response({'error': 'Cargo padrão não encontrado.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        user = Usuario.objects.create(
+            nome=nome,
+            email=email,
+            google_id=google_id,
+            cargo=cargo_dev,
+            ativo=True,
+        )
+
+    if not user.ativo:
+        return Response({'error': 'Usuário inativo.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # ── 4. MFA ativo → emite mfa_token em vez dos tokens definitivos ──────────
+    if user.mfa_ativo and user.mfa_tipo == 'EMAIL':
+        try:
+            enviar_otp_email(user)
+        except Exception:
+            return Response({'error': 'Falha ao enviar código MFA por e-mail.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        return _resposta_mfa_pendente(user)
+
+    if user.mfa_ativo and user.mfa_tipo == 'TOTP':
+        return _resposta_mfa_pendente(user)
+
+    # ── 5. Sem MFA → tokens definitivos ──────────────────────────────────────
+    return Response(_emitir_tokens(user), status=status.HTTP_200_OK)
+
+
+# ─── MFA STATUS ───────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def mfa_status(request):
+    """
+    Retorna o status atual do MFA do usuário logado.
+    GET /api/mfa/status/
+    """
+    user = request.user
+    return Response({
+        'mfa_ativo': user.mfa_ativo,
+        'mfa_tipo':  user.mfa_tipo,
+    })
+
+
+# ─── SETUP TOTP ───────────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mfa_setup_totp(request):
+    """
+    Inicia o setup do TOTP: gera secret e retorna QR code base64.
+    O MFA ainda NÃO é ativado — só ativa após /mfa/verify/totp/.
+
+    POST /api/mfa/setup/totp/
+    """
+    user = request.user
+
+    # Gera (ou regenera) o secret — não ativa ainda
+    user.gerar_totp_secret()
+
+    uri = user.get_totp_uri(issuer='Lazuli')
+    qr_base64 = gerar_qrcode_base64(uri)
+
+    return Response({
+        'secret': user.totp_secret,          # para digitação manual no app
+        'qrcode': qr_base64,                 # data:image/png;base64,...
+        'uri':    uri,                        # otpauth:// completo
+    })
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mfa_verify_totp(request):
+    """
+    Confirma o código TOTP e ativa o MFA no modo TOTP.
+    Body: { "code": "123456" }
+
+    POST /api/mfa/verify/totp/
+    """
+    user = request.user
+    code = request.data.get('code', '').strip()
+
+    if not code:
+        return Response({'error': 'Código obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not user.totp_secret:
+        return Response({'error': 'Inicie o setup TOTP primeiro.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not user.verificar_totp(code):
+        return Response({'error': 'Código inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Ativa o MFA
+    user.mfa_ativo = True
+    user.mfa_tipo  = 'TOTP'
+    user.save(update_fields=['mfa_ativo', 'mfa_tipo'])
+
+    return Response({'message': 'MFA via Authenticator ativado com sucesso!'})
+
+
+# ─── SETUP EMAIL OTP ──────────────────────────────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mfa_setup_email(request):
+    """
+    Envia um OTP para o e-mail do usuário para confirmar o setup.
+    POST /api/mfa/setup/email/
+    """
+    user = request.user
+
+    try:
+        enviar_otp_email(user)
+    except Exception as e:
+        return Response({'error': f'Falha ao enviar e-mail: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({'message': f'Código enviado para {user.email}. Válido por 10 minutos.'})
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def mfa_verify_email(request):
+    """
+    Confirma o OTP de e-mail e ativa o MFA no modo EMAIL.
+    Body: { "code": "123456" }
+
+    POST /api/mfa/verify/email/
+    """
+    user = request.user
+    code = request.data.get('code', '').strip()
+
+    if not code:
+        return Response({'error': 'Código obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not user.verificar_otp_email(code):
+        return Response({'error': 'Código inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Ativa o MFA
+    user.mfa_ativo = True
+    user.mfa_tipo  = 'EMAIL'
+    user.save(update_fields=['mfa_ativo', 'mfa_tipo'])
+
+    return Response({'message': 'MFA via e-mail ativado com sucesso!'})
+
+
+# ─── CHALLENGE (segundo fator durante o login) ────────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def mfa_challenge(request):
+    """
+    Valida o segundo fator e emite os tokens definitivos.
+    Body: { "mfa_token": "...", "code": "123456" }
+
+    POST /api/mfa/challenge/
+    """
+    mfa_token = request.data.get('mfa_token', '').strip()
+    code      = request.data.get('code', '').strip()
+
+    if not mfa_token or not code:
+        return Response({'error': 'mfa_token e code são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Valida o mfa_token ────────────────────────────────────────────────────
+    user_id = verificar_mfa_token(mfa_token)
+    if user_id is None:
+        return Response({'error': 'mfa_token inválido ou expirado. Faça login novamente.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        user = Usuario.objects.get(id=user_id)
+    except Usuario.DoesNotExist:
+        return Response({'error': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if not user.ativo:
+        return Response({'error': 'Usuário inativo.'}, status=status.HTTP_403_FORBIDDEN)
+
+    # ── Valida o código de acordo com o tipo ──────────────────────────────────
+    if user.mfa_tipo == 'TOTP':
+        valido = user.verificar_totp(code)
+    elif user.mfa_tipo == 'EMAIL':
+        valido = user.verificar_otp_email(code)
+    else:
+        return Response({'error': 'Tipo de MFA desconhecido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not valido:
+        return Response({'error': 'Código inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # ── Sucesso → emite tokens definitivos ────────────────────────────────────
+    return Response(_emitir_tokens(user), status=status.HTTP_200_OK)
+
+
+# ─── REENVIO DE OTP (para o challenge de email) ───────────────────────────────
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def mfa_resend_email(request):
+    """
+    Reenvia o OTP por e-mail durante o challenge de login.
+    Body: { "mfa_token": "..." }
+
+    POST /api/mfa/resend-email/
+    """
+    mfa_token = request.data.get('mfa_token', '').strip()
+    if not mfa_token:
+        return Response({'error': 'mfa_token obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user_id = verificar_mfa_token(mfa_token)
+    if user_id is None:
+        return Response({'error': 'mfa_token inválido ou expirado.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+    try:
+        user = Usuario.objects.get(id=user_id)
+    except Usuario.DoesNotExist:
+        return Response({'error': 'Usuário não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    try:
+        enviar_otp_email(user)
+    except Exception as e:
+        return Response({'error': f'Falha ao enviar e-mail: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    return Response({'message': 'Novo código enviado.'})
+
+
+# ─── DESATIVAR MFA ────────────────────────────────────────────────────────────
+
+@api_view(['DELETE'])
+@permission_classes([IsAuthenticated])
+def mfa_disable(request):
+    """
+    Desativa o MFA do usuário logado.
+    Exige confirmação de senha para segurança.
+    Body: { "password": "senha_atual" }
+
+    DELETE /api/mfa/disable/
+    """
+    user = request.user
+    password = request.data.get('password', '')
+
+    # Usuários que só têm Google (sem senha) podem desativar sem confirmação
+    if user.senha and not user.check_password(password):
+        return Response({'error': 'Senha incorreta.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    user.mfa_ativo    = False
+    user.mfa_tipo     = None
+    user.totp_secret  = None
+    user.otp_code     = None
+    user.otp_expira_em = None
+    user.save(update_fields=['mfa_ativo', 'mfa_tipo', 'totp_secret', 'otp_code', 'otp_expira_em'])
+
+    return Response({'message': 'MFA desativado com sucesso.'})
 ----- backend/backend/__init__.py -----
 
 ----- backend/backend/asgi.py -----
@@ -3068,22 +4192,21 @@ os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 application = get_asgi_application()
 
 ----- backend/backend/settings.py -----
-from datetime import timedelta
+# backend/backend/settings.py
+# Substitui o arquivo existente — adiciona config de e-mail e Google
 
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-SECRET_KEY = os.getenv('SECRET_KEY')
-DEBUG = os.getenv('DEBUG', 'False') == 'True'
+SECRET_KEY    = os.getenv('SECRET_KEY')
+DEBUG         = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Application definition
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -3108,16 +4231,14 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# --- ALTERAÇÃO 1: Configuração de Backend de Autenticação ---
 AUTHENTICATION_BACKENDS = [
-    'api.backends.EmailBackend',  # Aponta para o arquivo backends.py que criamos
-    'django.contrib.auth.backends.ModelBackend', # Mantém para o admin do Django funcionar se necessário
+    'api.backends.EmailBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
-# ------------------------------------------------------------
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",  # porta padrão do Vite
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -3139,24 +4260,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-# ✅ PostgreSQL
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
+        'NAME':     os.getenv('DB_NAME'),
+        'USER':     os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+        'HOST':     os.getenv('DB_HOST', 'localhost'),
+        'PORT':     os.getenv('DB_PORT', '5432'),
     }
 }
-# ✅ DRF + JWT
+
 REST_FRAMEWORK = {
-    # ALTERE AQUI: Aponte para a nossa classe customizada
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'api.authentication.CustomJWTAuthentication',
     ),
@@ -3165,62 +4280,44 @@ REST_FRAMEWORK = {
     ),
 }
 
-# --- ALTERAÇÃO 2: Configuração do JWT ---
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    
-    # Configurações para o seu modelo Usuario personalizado
-    'USER_ID_FIELD': 'id',        # O campo PK do seu model é 'id'
-    'USER_ID_CLAIM': 'user_id',   # O token vai conter 'user_id' em vez de 'user_id' padrão
-    
-    # Regra customizada: Usa o atributo 'ativo' do seu model Usuario para validar
+    'ROTATE_REFRESH_TOKENS':  True,
+    'AUTH_HEADER_TYPES':      ('Bearer',),
+    'USER_ID_FIELD':          'id',
+    'USER_ID_CLAIM':          'user_id',
     'USER_AUTHENTICATION_RULE': lambda user: user is not None and user.ativo,
 }
-# ---------------------------------------
 
+# ── E-mail ────────────────────────────────────────────────────────────────────
+# Em desenvolvimento sem SMTP, use o backend console:
+#   EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+EMAIL_BACKEND      = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST         = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT         = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS      = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER    = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Lazuli <noreply@lazuli.app>')
 
-# Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
+# ── Google OAuth ──────────────────────────────────────────────────────────────
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 
+# ── Padrões ───────────────────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
-
-LANGUAGE_CODE = 'en-us'
-
-TIME_ZONE = 'UTC'
-
-USE_I18N = True
-
-USE_TZ = True
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/ref/settings/#static-files/
+LANGUAGE_CODE = 'pt-br'
+TIME_ZONE     = 'America/Fortaleza'
+USE_I18N      = True
+USE_TZ        = True
 
 STATIC_URL = 'static/'
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 ----- backend/backend/urls.py -----
 # backend/backend/urls.py
@@ -3282,6 +4379,7 @@ if __name__ == '__main__':
 
 
 ===== REQUIREMENTS =====
+# backend/requirements.txt
 asgiref==3.11.1
 Django==5.2.14
 django-cors-headers==4.9.0
@@ -3292,3 +4390,12 @@ PyJWT==2.12.1
 python-dotenv==1.2.2
 sqlparse==0.5.5
 typing_extensions==4.15.0
+ 
+# ── MFA ───────────────────────────────────
+pyotp==2.9.0          # TOTP / HOTP (Google Authenticator)
+qrcode[pil]==8.0      # Geração de QR code PNG
+Pillow==11.2.1        # Dependência do qrcode[pil]
+ 
+# ── Google OAuth ──────────────────────────
+requests==2.32.3      # Chamada HTTP para tokeninfo do Google
+ 

@@ -1,19 +1,18 @@
-from datetime import timedelta
+# backend/backend/settings.py
+# Substitui o arquivo existente — adiciona config de e-mail e Google
 
+from datetime import timedelta
 from pathlib import Path
 from dotenv import load_dotenv
 import os
 
 load_dotenv()
 
-SECRET_KEY = os.getenv('SECRET_KEY')
-DEBUG = os.getenv('DEBUG', 'False') == 'True'
+SECRET_KEY    = os.getenv('SECRET_KEY')
+DEBUG         = os.getenv('DEBUG', 'False') == 'True'
 ALLOWED_HOSTS = os.getenv('ALLOWED_HOSTS', '').split(',')
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Application definition
 
 INSTALLED_APPS = [
     'django.contrib.admin',
@@ -38,16 +37,14 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-# --- ALTERAÇÃO 1: Configuração de Backend de Autenticação ---
 AUTHENTICATION_BACKENDS = [
-    'api.backends.EmailBackend',  # Aponta para o arquivo backends.py que criamos
-    'django.contrib.auth.backends.ModelBackend', # Mantém para o admin do Django funcionar se necessário
+    'api.backends.EmailBackend',
+    'django.contrib.auth.backends.ModelBackend',
 ]
-# ------------------------------------------------------------
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",  # porta padrão do Vite
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -69,24 +66,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
-
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
-
-# ✅ PostgreSQL
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('DB_NAME'),
-        'USER': os.getenv('DB_USER'),
+        'NAME':     os.getenv('DB_NAME'),
+        'USER':     os.getenv('DB_USER'),
         'PASSWORD': os.getenv('DB_PASSWORD'),
-        'HOST': os.getenv('DB_HOST', 'localhost'),
-        'PORT': os.getenv('DB_PORT', '5432'),
+        'HOST':     os.getenv('DB_HOST', 'localhost'),
+        'PORT':     os.getenv('DB_PORT', '5432'),
     }
 }
-# ✅ DRF + JWT
+
 REST_FRAMEWORK = {
-    # ALTERE AQUI: Aponte para a nossa classe customizada
     'DEFAULT_AUTHENTICATION_CLASSES': (
         'api.authentication.CustomJWTAuthentication',
     ),
@@ -95,60 +86,42 @@ REST_FRAMEWORK = {
     ),
 }
 
-# --- ALTERAÇÃO 2: Configuração do JWT ---
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=30),
+    'ACCESS_TOKEN_LIFETIME':  timedelta(minutes=30),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),
-    'ROTATE_REFRESH_TOKENS': True,
-    'AUTH_HEADER_TYPES': ('Bearer',),
-    
-    # Configurações para o seu modelo Usuario personalizado
-    'USER_ID_FIELD': 'id',        # O campo PK do seu model é 'id'
-    'USER_ID_CLAIM': 'user_id',   # O token vai conter 'user_id' em vez de 'user_id' padrão
-    
-    # Regra customizada: Usa o atributo 'ativo' do seu model Usuario para validar
+    'ROTATE_REFRESH_TOKENS':  True,
+    'AUTH_HEADER_TYPES':      ('Bearer',),
+    'USER_ID_FIELD':          'id',
+    'USER_ID_CLAIM':          'user_id',
     'USER_AUTHENTICATION_RULE': lambda user: user is not None and user.ativo,
 }
-# ---------------------------------------
 
+# ── E-mail ────────────────────────────────────────────────────────────────────
+# Em desenvolvimento sem SMTP, use o backend console:
+#   EMAIL_BACKEND=django.core.mail.backends.console.EmailBackend
+EMAIL_BACKEND      = os.getenv('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
+EMAIL_HOST         = os.getenv('EMAIL_HOST', 'smtp.gmail.com')
+EMAIL_PORT         = int(os.getenv('EMAIL_PORT', '587'))
+EMAIL_USE_TLS      = os.getenv('EMAIL_USE_TLS', 'True') == 'True'
+EMAIL_HOST_USER    = os.getenv('EMAIL_HOST_USER', '')
+EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
+DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'Lazuli <noreply@lazuli.app>')
 
-# Password validation
-# https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
+# ── Google OAuth ──────────────────────────────────────────────────────────────
+GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 
+# ── Padrões ───────────────────────────────────────────────────────────────────
 AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
+    {'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator'},
+    {'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator'},
 ]
 
-
-# Internationalization
-# https://docs.djangoproject.com/en/5.2/topics/i18n/
-
-LANGUAGE_CODE = 'en-us'
-
-TIME_ZONE = 'UTC'
-
-USE_I18N = True
-
-USE_TZ = True
-
-
-# Static files (CSS, JavaScript, Images)
-# https://docs.djangoproject.com/en/5.2/ref/settings/#static-files/
+LANGUAGE_CODE = 'pt-br'
+TIME_ZONE     = 'America/Fortaleza'
+USE_I18N      = True
+USE_TZ        = True
 
 STATIC_URL = 'static/'
-
-# Default primary key field type
-# https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
-
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

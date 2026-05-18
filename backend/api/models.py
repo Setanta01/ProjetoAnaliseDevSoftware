@@ -1,4 +1,6 @@
 # backend/api/models.py
+
+
 from django.db import models
 
 
@@ -8,7 +10,7 @@ class Cargo(models.Model):
 
     class Meta:
         db_table = 'cargos'
-        managed = False  # Importante: O Django não vai tentar criar/migrar esta tabela
+        managed = False
 
     def __str__(self):
         return self.nome
@@ -18,40 +20,96 @@ class Usuario(models.Model):
     id = models.AutoField(primary_key=True)
     nome = models.CharField(max_length=120)
     email = models.CharField(max_length=150, unique=True)
-    senha = models.CharField(max_length=255) # Mapeia a coluna 'senha' do seu SQL
-    
-    # Chaves Estrangeiras
+    senha = models.CharField(max_length=255, blank=True)  # blank=True → usuários Google podem não ter senha
+
     cargo = models.ForeignKey(Cargo, on_delete=models.PROTECT, db_column='cargo_id')
-    convidado_por = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, db_column='convidado_por')
-    
+    convidado_por = models.ForeignKey('self', on_delete=models.SET_NULL, null=True, blank=True, db_column='convidado_por')
+
     ativo = models.BooleanField(default=True)
     criado_em = models.DateTimeField(auto_now_add=True)
 
-    # --- NOVA ADIÇÃO ---
-    @property
-    def is_authenticated(self):
-        """
-        Otimização para o Django Rest Framework e SimpleJWT.
-        Indica que qualquer instância carregada deste modelo é um usuário 
-        autenticado válido (desde que exista no banco).
-        """
-        return True
-    # ---------------------
+    # ── MFA ──────────────────────────────────────────────────────────────────
+    mfa_ativo   = models.BooleanField(default=False)
+    mfa_tipo    = models.CharField(
+        max_length=10, null=True, blank=True,
+        choices=[('TOTP', 'Authenticator App'), ('EMAIL', 'E-mail OTP')],
+    )
+    totp_secret = models.CharField(max_length=64,  null=True, blank=True)
+
+    # OTP por e-mail (armazenado temporariamente, limpo após uso)
+    otp_code      = models.CharField(max_length=8,  null=True, blank=True)
+    otp_expira_em = models.DateTimeField(null=True, blank=True)
+
+    # ── Google OAuth ──────────────────────────────────────────────────────────
+    google_id = models.CharField(max_length=128, null=True, blank=True, unique=True)
 
     class Meta:
         db_table = 'usuarios'
-        managed = False # Importante: O Django não vai tentar criar/migrar esta tabela
+        managed = False
 
-    # Métodos auxiliares para simular comportamento de usuário do Django
+    @property
+    def is_authenticated(self):
+        return True
+
     def set_password(self, raw_password):
-        """Criptografa a senha antes de salvar"""
         from django.contrib.auth.hashers import make_password
         self.senha = make_password(raw_password)
 
     def check_password(self, raw_password):
-        """Verifica se a senha bate com o hash no banco"""
         from django.contrib.auth.hashers import check_password
         return check_password(raw_password, self.senha)
+
+    # ── Helpers MFA ───────────────────────────────────────────────────────────
+
+    def gerar_totp_secret(self):
+        """Gera e salva um novo secret TOTP (não ativa o MFA ainda)."""
+        import pyotp
+        self.totp_secret = pyotp.random_base32()
+        self.save(update_fields=['totp_secret'])
+        return self.totp_secret
+
+    def verificar_totp(self, code: str) -> bool:
+        """Verifica código TOTP com janela de 1 período (±30 s)."""
+        if not self.totp_secret:
+            return False
+        import pyotp
+        totp = pyotp.TOTP(self.totp_secret)
+        return totp.verify(code, valid_window=1)
+
+    def gerar_otp_email(self) -> str:
+        """Gera OTP numérico de 6 dígitos válido por 10 minutos."""
+        import random
+        from django.utils import timezone
+        from datetime import timedelta
+        code = f"{random.randint(0, 999999):06d}"
+        self.otp_code = code
+        self.otp_expira_em = timezone.now() + timedelta(minutes=10)
+        self.save(update_fields=['otp_code', 'otp_expira_em'])
+        return code
+
+    def verificar_otp_email(self, code: str) -> bool:
+        """Verifica OTP de e-mail e o invalida após uso correto."""
+        from django.utils import timezone
+        if not self.otp_code or not self.otp_expira_em:
+            return False
+        if timezone.now() > self.otp_expira_em:
+            return False
+        if self.otp_code != code:
+            return False
+        # Invalida após uso
+        self.otp_code = None
+        self.otp_expira_em = None
+        self.save(update_fields=['otp_code', 'otp_expira_em'])
+        return True
+
+    def get_totp_uri(self, issuer: str = 'Lazuli') -> str:
+        """Retorna o URI otpauth:// para gerar o QR code."""
+        import pyotp
+        totp = pyotp.TOTP(self.totp_secret)
+        return totp.provisioning_uri(name=self.email, issuer_name=issuer)
+
+
+# ─── Restante dos modelos (inalterados) ───────────────────────────────────────
 
 class ConviteSistema(models.Model):
     id = models.AutoField(primary_key=True)
@@ -87,8 +145,6 @@ class ProjetoParticipante(models.Model):
 
     class Meta:
         db_table = 'projeto_participantes'
-        # O Django cria unique_together automaticamente para o PK composto se não tiver PK explícito,
-        # mas aqui temos o 'id' explícito. Vamos forçar a unicidade do par.
         constraints = [
             models.UniqueConstraint(fields=['projeto', 'usuario'], name='unique_projeto_usuario')
         ]
@@ -150,8 +206,8 @@ class Task(models.Model):
     responsavel = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column='responsavel_id', related_name='tasks_responsavel')
     criado_em = models.DateTimeField(auto_now_add=True)
     story_points = models.IntegerField(null=True, blank=True)
-    due_date = models.DateField(null=True, blank=True) 
-    tags = models.CharField(max_length=255, blank=True, null=True) 
+    due_date = models.DateField(null=True, blank=True)
+    tags = models.CharField(max_length=255, blank=True, null=True)
 
     class Meta:
         db_table = 'tasks'
@@ -188,7 +244,6 @@ class Comentario(models.Model):
 
 
 class TaskHistorico(models.Model):
-    # Enums copiados da Task para referência
     class StatusChoices(models.TextChoices):
         BACKLOG = 'BACKLOG', 'Backlog'
         TODO = 'TODO', 'To Do'
@@ -224,4 +279,4 @@ class Notificacao(models.Model):
     sprint = models.ForeignKey(Sprint, on_delete=models.SET_NULL, null=True, blank=True, db_column='sprint_id')
 
     class Meta:
-        db_table = 'notificacoes'    
+        db_table = 'notificacoes'
