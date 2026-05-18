@@ -1,3 +1,4 @@
+# backend/api/models.py
 from django.db import models
 
 
@@ -148,6 +149,9 @@ class Task(models.Model):
     criado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='criado_por', related_name='tasks_criadas')
     responsavel = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column='responsavel_id', related_name='tasks_responsavel')
     criado_em = models.DateTimeField(auto_now_add=True)
+    story_points = models.IntegerField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True) 
+    tags = models.CharField(max_length=255, blank=True, null=True) 
 
     class Meta:
         db_table = 'tasks'

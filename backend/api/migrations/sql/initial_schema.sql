@@ -122,6 +122,9 @@ CREATE TABLE tasks (
     criado_por     INT NOT NULL,
     responsavel_id INT NULL,
     criado_em      TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    story_points   INT NULL,           
+    due_date       DATE NULL,          
+    tags           VARCHAR(255) NULL,  
 
     FOREIGN KEY (projeto_id)     REFERENCES projetos(id),
     FOREIGN KEY (backlog_id)     REFERENCES backlogs(id),

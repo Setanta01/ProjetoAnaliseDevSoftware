@@ -39,10 +39,12 @@ backend/manage.py
 backend/requirements.txt
 frontend/src/App.css
 frontend/src/App.tsx
+frontend/src/Dashboard.tsx
 frontend/src/api.ts
 frontend/src/assets/hero.png
 frontend/src/assets/react.svg
 frontend/src/assets/vite.svg
+frontend/src/components/ui.tsx
 frontend/src/dashboards/Admindashboard.tsx
 frontend/src/dashboards/DashboardRouter.tsx
 frontend/src/dashboards/Devdashboard.tsx
@@ -50,6 +52,14 @@ frontend/src/dashboards/Gerentedashboard.tsx
 frontend/src/dashboards/Qadashboard.tsx
 frontend/src/index.css
 frontend/src/main.tsx
+frontend/src/modals/CardDetailModal.tsx
+frontend/src/modals/CreateCardModal.tsx
+frontend/src/modals/EstimateDifficultyModal.tsx
+frontend/src/types.ts
+frontend/src/views/AdminProjectsView.tsx
+frontend/src/views/BacklogView.tsx
+frontend/src/views/BoardView.tsx
+frontend/src/views/SprintHistoryView.tsx
 
 ===== PACKAGE.JSON =====
 {
@@ -65,6 +75,7 @@ frontend/src/main.tsx
   },
   "dependencies": {
     "axios": "^1.16.1",
+    "lucide-react": "^1.16.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6"
   },
@@ -297,6 +308,780 @@ function App() {
 }
 
 export default App
+----- frontend/src/Dashboard.tsx -----
+import { useState, useEffect } from "react";
+import type { CSSProperties, ReactNode } from "react";
+
+const API_BASE = "http://localhost:8000/api";
+
+// ─── TIPOS ────────────────────────────────────────────────────────────────────
+
+interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  cargo: Cargo;
+}
+
+interface Projeto {
+  id: number;
+  nome: string;
+  descricao?: string;
+  criado_em?: string;
+}
+
+interface Sprint {
+  id: number;
+  nome: string;
+  status: "PLANEJADA" | "ATIVA" | "CONCLUIDA";
+  projeto_id: number;
+  total_tasks?: number;
+  concluidas?: number;
+  progresso?: number;
+  data_inicio?: string;
+  data_fim?: string;
+}
+
+interface Task {
+  id: number;
+  titulo: string;
+  descricao?: string;
+  status: TaskStatus;
+  prioridade: Prioridade;
+  responsavel_id?: number;
+  responsavel_nome?: string;
+  sprint_id?: number;
+  projeto_id?: number;
+  criado_em?: string;
+}
+
+interface Usuario {
+  id: number;
+  nome: string;
+  email: string;
+  cargo: Cargo;
+  ativo: boolean;
+  criado_em?: string;
+}
+
+interface AdminStats {
+  total_usuarios: number;
+  total_projetos: number;
+  sprints_ativas: number;
+  convites_pendentes: number;
+}
+
+type Cargo = "ADMIN" | "GERENTE" | "DEV" | "QA";
+type TaskStatus = "BACKLOG" | "TODO" | "EM_ANDAMENTO" | "REVISAO" | "CONCLUIDO" | "BLOQUEADO";
+type Prioridade = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
+type FeedbackStatus = "aprovando" | "aprovado" | "reprovando" | "reprovado" | "erro";
+
+// ─── API HELPER ───────────────────────────────────────────────────────────────
+
+function apiFetch(endpoint: string, options: RequestInit = {}): Promise<any> {
+  const token = localStorage.getItem("access_token");
+  return fetch(`${API_BASE}${endpoint}`, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers as Record<string, string> ?? {}),
+    },
+  }).then(async (res) => {
+    if (!res.ok) throw await res.json();
+    return res.json();
+  });
+}
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+
+function getInitials(name: string): string {
+  return name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase();
+}
+
+const CARGO_COLOR: Record<Cargo, { bg: string; text: string }> = {
+  ADMIN:   { bg: "#EDE9FE", text: "#5B21B6" },
+  GERENTE: { bg: "#DBEAFE", text: "#1D4ED8" },
+  DEV:     { bg: "#D1FAE5", text: "#065F46" },
+  QA:      { bg: "#FEF3C7", text: "#92400E" },
+};
+
+const STATUS_COLOR: Record<TaskStatus, { bg: string; text: string }> = {
+  BACKLOG:      { bg: "#F3F4F6", text: "#374151" },
+  TODO:         { bg: "#DBEAFE", text: "#1E40AF" },
+  EM_ANDAMENTO: { bg: "#FEF3C7", text: "#92400E" },
+  REVISAO:      { bg: "#EDE9FE", text: "#5B21B6" },
+  CONCLUIDO:    { bg: "#D1FAE5", text: "#065F46" },
+  BLOQUEADO:    { bg: "#FEE2E2", text: "#991B1B" },
+};
+
+const PRIORIDADE_COLOR: Record<Prioridade, { bg: string; text: string }> = {
+  BAIXA:   { bg: "#D1FAE5", text: "#065F46" },
+  MEDIA:   { bg: "#DBEAFE", text: "#1E40AF" },
+  ALTA:    { bg: "#FEF3C7", text: "#92400E" },
+  CRITICA: { bg: "#FEE2E2", text: "#991B1B" },
+};
+
+// ─── COMPONENTES BASE ─────────────────────────────────────────────────────────
+
+interface BadgeProps {
+  label: string;
+  colors?: { bg: string; text: string };
+  size?: "sm" | "md";
+}
+
+function Badge({ label, colors, size = "sm" }: BadgeProps) {
+  const style: CSSProperties = {
+    display: "inline-flex",
+    alignItems: "center",
+    padding: size === "sm" ? "2px 8px" : "4px 12px",
+    borderRadius: 20,
+    fontSize: size === "sm" ? 11 : 12,
+    fontWeight: 600,
+    background: colors?.bg ?? "#F3F4F6",
+    color: colors?.text ?? "#374151",
+    letterSpacing: 0.3,
+  };
+  return <span style={style}>{label}</span>;
+}
+
+interface StatCardProps {
+  icon: string;
+  value: number | string;
+  label: string;
+  accent: string;
+}
+
+function StatCard({ icon, value, label, accent }: StatCardProps) {
+  return (
+    <div style={{
+      background: "#fff",
+      border: "1px solid #E5E7EB",
+      borderRadius: 14,
+      padding: "1.25rem",
+      display: "flex",
+      flexDirection: "column",
+      gap: 4,
+      borderTop: `3px solid ${accent}`,
+    }}>
+      <span style={{ fontSize: 22 }}>{icon}</span>
+      <span style={{ fontSize: 28, fontWeight: 700, color: "#111827", lineHeight: 1.1 }}>{value}</span>
+      <span style={{ fontSize: 12, color: "#6B7280", fontWeight: 500 }}>{label}</span>
+    </div>
+  );
+}
+
+function TaskRow({ task }: { task: Task }) {
+  return (
+    <div style={{
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
+      padding: "12px 0",
+      borderBottom: "1px solid #F3F4F6",
+    }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 500, fontSize: 14, color: "#111827", marginBottom: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {task.titulo}
+        </div>
+        {task.responsavel_nome && (
+          <div style={{ fontSize: 12, color: "#9CA3AF" }}>{task.responsavel_nome}</div>
+        )}
+      </div>
+      <div style={{ display: "flex", gap: 6, marginLeft: 12, flexShrink: 0 }}>
+        <Badge label={task.prioridade} colors={PRIORIDADE_COLOR[task.prioridade]} />
+        <Badge label={task.status.replace("_", " ")} colors={STATUS_COLOR[task.status]} />
+      </div>
+    </div>
+  );
+}
+
+function SprintProgress({ sprint }: { sprint: Sprint }) {
+  const pct = sprint.progresso ?? 0;
+  return (
+    <div style={{ background: "#fff", border: "1px solid #E5E7EB", borderRadius: 12, padding: "1rem 1.25rem" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+        <span style={{ fontWeight: 600, fontSize: 14, color: "#111827" }}>{sprint.nome}</span>
+        <Badge
+          label={sprint.status}
+          colors={sprint.status === "ATIVA" ? { bg: "#D1FAE5", text: "#065F46" } : { bg: "#F3F4F6", text: "#374151" }}
+        />
+      </div>
+      <div style={{ fontSize: 12, color: "#6B7280", marginBottom: 8 }}>{sprint.total_tasks ?? "—"} tasks</div>
+      <div style={{ background: "#F3F4F6", borderRadius: 99, height: 6 }}>
+        <div style={{ background: "#3B82F6", borderRadius: 99, height: 6, width: `${pct}%`, transition: "width 0.6s ease" }} />
+      </div>
+      <div style={{ fontSize: 12, color: "#6B7280", marginTop: 4 }}>{Math.round(pct)}% concluído</div>
+    </div>
+  );
+}
+
+function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+  const initials = getInitials(name);
+  const bgColors = ["#BFDBFE", "#A7F3D0", "#FDE68A", "#FBCFE8", "#DDD6FE"];
+  const textColors = ["#1E40AF", "#065F46", "#92400E", "#9D174D", "#5B21B6"];
+  const idx = (name.charCodeAt(0) || 0) % bgColors.length;
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: bgColors[idx], color: textColors[idx],
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: size * 0.35, fontWeight: 700, flexShrink: 0,
+    }}>{initials}</div>
+  );
+}
+
+interface SectionCardProps {
+  title: string;
+  children: ReactNode;
+  action?: ReactNode;
+}
+
+function SectionCard({ title, children, action }: SectionCardProps) {
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E5E7EB", padding: "1.25rem", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: "#111827" }}>{title}</h2>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function EmptyState({ message }: { message: string }) {
+  return (
+    <div style={{ textAlign: "center", padding: "2rem", color: "#9CA3AF", fontSize: 13 }}>
+      {message}
+    </div>
+  );
+}
+
+function LoadingSpinner() {
+  return (
+    <div style={{ display: "flex", justifyContent: "center", padding: "2rem" }}>
+      <div style={{
+        width: 32, height: 32,
+        border: "3px solid #E5E7EB",
+        borderTop: "3px solid #3B82F6",
+        borderRadius: "50%",
+        animation: "spin 0.8s linear infinite",
+      }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+// ─── DASHBOARDS POR CARGO ─────────────────────────────────────────────────────
+
+function AdminDashboard({ profile }: { profile: UserProfile }) {
+  const [stats, setStats] = useState<AdminStats | null>(null);
+  const [usuarios, setUsuarios] = useState<Usuario[]>([]);
+  const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.allSettled([
+      apiFetch("/admin/stats/"),
+      apiFetch("/admin/usuarios/"),
+      apiFetch("/projetos/"),
+    ]).then(([s, u, p]) => {
+      if (s.status === "fulfilled") setStats(s.value as AdminStats);
+      if (u.status === "fulfilled") setUsuarios(u.value as Usuario[]);
+      if (p.status === "fulfilled") setProjetos(p.value as Projeto[]);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Painel Admin</h1>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Visão geral do sistema</p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))", gap: 12, marginBottom: 20 }}>
+        <StatCard icon="👥" value={stats?.total_usuarios ?? usuarios.length} label="Usuários ativos" accent="#3B82F6" />
+        <StatCard icon="📁" value={stats?.total_projetos ?? projetos.length} label="Projetos" accent="#10B981" />
+        <StatCard icon="✉️" value={stats?.convites_pendentes ?? "—"} label="Convites pendentes" accent="#F59E0B" />
+        <StatCard icon="🏃" value={stats?.sprints_ativas ?? "—"} label="Sprints ativas" accent="#8B5CF6" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 16 }}>
+        <SectionCard title="Usuários recentes">
+          {usuarios.length === 0
+            ? <EmptyState message="Nenhum usuário encontrado" />
+            : usuarios.slice(0, 5).map((u) => (
+              <div key={u.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <Avatar name={u.nome} />
+                  <div>
+                    <div style={{ fontWeight: 500, fontSize: 14 }}>{u.nome}</div>
+                    <Badge label={u.cargo} colors={CARGO_COLOR[u.cargo] ?? CARGO_COLOR.DEV} />
+                  </div>
+                </div>
+                <span style={{ fontSize: 12, fontWeight: 500, color: u.ativo ? "#10B981" : "#EF4444" }}>
+                  {u.ativo ? "Ativo" : "Inativo"}
+                </span>
+              </div>
+            ))
+          }
+        </SectionCard>
+
+        <SectionCard title="Ações rápidas">
+          {(["Gerar convite", "Criar projeto", "Ver relatórios", "Gerenciar cargos"] as const).map((a) => (
+            <button key={a} style={{
+              display: "block", width: "100%", textAlign: "left",
+              background: "none", border: "1px solid #E5E7EB", borderRadius: 8,
+              padding: "10px 14px", marginBottom: 8, cursor: "pointer",
+              fontSize: 14, fontWeight: 500, color: "#374151",
+            }}>
+              {a} →
+            </button>
+          ))}
+        </SectionCard>
+      </div>
+
+      {projetos.length > 0 && (
+        <SectionCard title="Projetos do sistema">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))", gap: 10 }}>
+            {projetos.map((p) => (
+              <div key={p.id} style={{ padding: "12px 14px", background: "#F9FAFB", borderRadius: 10, border: "1px solid #E5E7EB" }}>
+                <div style={{ fontWeight: 600, fontSize: 14, color: "#111827", marginBottom: 4 }}>{p.nome}</div>
+                {p.descricao && <div style={{ fontSize: 12, color: "#6B7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.descricao}</div>}
+              </div>
+            ))}
+          </div>
+        </SectionCard>
+      )}
+    </div>
+  );
+}
+
+function GerenteDashboard({ profile }: { profile: UserProfile }) {
+  const [projetos, setProjetos] = useState<Projeto[]>([]);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    Promise.allSettled([
+      apiFetch("/projetos/"),
+      apiFetch("/sprints/"),
+      apiFetch("/tasks/"),
+    ]).then(([p, s, t]) => {
+      if (p.status === "fulfilled") setProjetos(p.value as Projeto[]);
+      if (s.status === "fulfilled") setSprints(s.value as Sprint[]);
+      if (t.status === "fulfilled") setTasks(t.value as Task[]);
+      setLoading(false);
+    });
+  }, []);
+
+  if (loading) return <LoadingSpinner />;
+
+  const sprintsAtivas = sprints.filter((s) => s.status === "ATIVA" || s.status === "PLANEJADA");
+  const tasksEquipe = tasks.filter((t) => t.status !== "BACKLOG").slice(0, 8);
+
+  return (
+    <div>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Painel Gerente</h1>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Acompanhamento de sprints e equipe</p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
+        <StatCard icon="📁" value={projetos.length} label="Projetos" accent="#3B82F6" />
+        <StatCard icon="🏃" value={sprints.filter((s) => s.status === "ATIVA").length} label="Sprints ativas" accent="#10B981" />
+        <StatCard icon="📋" value={tasks.length} label="Total tasks" accent="#F59E0B" />
+        <StatCard icon="✅" value={tasks.filter((t) => t.status === "CONCLUIDO").length} label="Concluídas" accent="#8B5CF6" />
+      </div>
+
+      {sprintsAtivas.length > 0 && (
+        <SectionCard title="Sprints">
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+            {sprintsAtivas.map((s) => <SprintProgress key={s.id} sprint={s} />)}
+          </div>
+        </SectionCard>
+      )}
+
+      <SectionCard title="Tasks da equipe">
+        {tasksEquipe.length === 0
+          ? <EmptyState message="Nenhuma task em andamento" />
+          : tasksEquipe.map((t) => <TaskRow key={t.id} task={t} />)
+        }
+      </SectionCard>
+    </div>
+  );
+}
+
+function DevDashboard({ profile }: { profile: UserProfile }) {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    apiFetch("/tasks/minhas/")
+      .catch(() => apiFetch("/tasks/"))
+      .then((res: unknown) => {
+        const arr = Array.isArray(res) ? res as Task[] : (res as { results?: Task[] }).results ?? [];
+        setTasks(arr);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  if (loading) return <LoadingSpinner />;
+
+  const emAndamento = tasks.filter((t) => t.status === "EM_ANDAMENTO");
+  const todo        = tasks.filter((t) => t.status === "TODO");
+  const bloqueadas  = tasks.filter((t) => t.status === "BLOQUEADO");
+  const concluidas  = tasks.filter((t) => t.status === "CONCLUIDO");
+
+  return (
+    <div>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Meu Painel</h1>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Suas tasks e atividades</p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
+        <StatCard icon="⚡" value={emAndamento.length} label="Em andamento" accent="#F59E0B" />
+        <StatCard icon="📋" value={todo.length}        label="A fazer"      accent="#3B82F6" />
+        <StatCard icon="🚫" value={bloqueadas.length}  label="Bloqueadas"   accent="#EF4444" />
+        <StatCard icon="✅" value={concluidas.length}  label="Concluídas"   accent="#10B981" />
+      </div>
+
+      <SectionCard title="Minhas tasks">
+        {tasks.length === 0
+          ? <EmptyState message="Nenhuma task atribuída a você" />
+          : tasks.slice(0, 10).map((t) => <TaskRow key={t.id} task={t} />)
+        }
+      </SectionCard>
+    </div>
+  );
+}
+
+function QADashboard({ profile }: { profile: UserProfile }) {
+  const [paraRevisar, setParaRevisar] = useState<Task[]>([]);
+  const [historico, setHistorico]     = useState<Task[]>([]);
+  const [loading, setLoading]         = useState(true);
+  const [feedback, setFeedback]       = useState<Record<number, FeedbackStatus>>({});
+
+  useEffect(() => {
+    apiFetch("/tasks/?status=REVISAO")
+      .catch(() => apiFetch("/tasks/"))
+      .then((res: unknown) => {
+        const all = Array.isArray(res) ? res as Task[] : (res as { results?: Task[] }).results ?? [];
+        setParaRevisar(all.filter((t) => t.status === "REVISAO"));
+        setHistorico(all.filter((t) => t.status === "CONCLUIDO").slice(0, 5));
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  const handleAprovar = (id: number) => {
+    setFeedback((f) => ({ ...f, [id]: "aprovando" }));
+    apiFetch(`/tasks/${id}/`, { method: "PATCH", body: JSON.stringify({ status: "CONCLUIDO" }) })
+      .then(() => setFeedback((f) => ({ ...f, [id]: "aprovado" })))
+      .catch(() => setFeedback((f) => ({ ...f, [id]: "erro" })));
+  };
+
+  const handleReprovar = (id: number) => {
+    setFeedback((f) => ({ ...f, [id]: "reprovando" }));
+    apiFetch(`/tasks/${id}/`, { method: "PATCH", body: JSON.stringify({ status: "EM_ANDAMENTO" }) })
+      .then(() => setFeedback((f) => ({ ...f, [id]: "reprovado" })))
+      .catch(() => setFeedback((f) => ({ ...f, [id]: "erro" })));
+  };
+
+  if (loading) return <LoadingSpinner />;
+
+  return (
+    <div>
+      <div style={{ marginBottom: "1.5rem" }}>
+        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 700, color: "#111827" }}>Painel QA</h1>
+        <p style={{ margin: "4px 0 0", fontSize: 13, color: "#6B7280" }}>Tasks aguardando revisão</p>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 12, marginBottom: 20 }}>
+        <StatCard icon="🔍" value={paraRevisar.length} label="Para revisar" accent="#F59E0B" />
+        <StatCard icon="✅" value={Object.values(feedback).filter((v) => v === "aprovado").length}  label="Aprovadas"   accent="#10B981" />
+        <StatCard icon="↩️" value={Object.values(feedback).filter((v) => v === "reprovado").length} label="Reprovadas"  accent="#EF4444" />
+      </div>
+
+      <SectionCard title="Aguardando revisão">
+        {paraRevisar.length === 0
+          ? <EmptyState message="Nenhuma task aguardando revisão 🎉" />
+          : paraRevisar.map((t) => {
+            const fb = feedback[t.id];
+            return (
+              <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid #F3F4F6", gap: 8 }}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontWeight: 500, fontSize: 14, color: "#111827", marginBottom: 2 }}>{t.titulo}</div>
+                  <div style={{ fontSize: 12, color: "#9CA3AF" }}>{t.responsavel_nome}</div>
+                </div>
+                <div style={{ display: "flex", gap: 6, alignItems: "center", flexShrink: 0 }}>
+                  <Badge label={t.prioridade} colors={PRIORIDADE_COLOR[t.prioridade]} />
+                  {fb === "aprovado"  && <Badge label="Aprovado ✓"  colors={{ bg: "#D1FAE5", text: "#065F46" }} />}
+                  {fb === "reprovado" && <Badge label="Reprovado ✗" colors={{ bg: "#FEE2E2", text: "#991B1B" }} />}
+                  {fb === "erro"      && <Badge label="Erro"        colors={{ bg: "#FEE2E2", text: "#991B1B" }} />}
+                  {!fb && (
+                    <>
+                      <button onClick={() => handleAprovar(t.id)}  style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "none", background: "#D1FAE5", color: "#065F46", cursor: "pointer", fontWeight: 600 }}>✓ Aprovar</button>
+                      <button onClick={() => handleReprovar(t.id)} style={{ fontSize: 12, padding: "4px 12px", borderRadius: 8, border: "none", background: "#FEE2E2", color: "#991B1B", cursor: "pointer", fontWeight: 600 }}>✗ Reprovar</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        }
+      </SectionCard>
+
+      {historico.length > 0 && (
+        <SectionCard title="Concluídas recentes">
+          {historico.map((t) => (
+            <div key={t.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #F3F4F6" }}>
+              <div style={{ fontWeight: 500, fontSize: 14 }}>{t.titulo}</div>
+              <Badge label="CONCLUÍDO" colors={STATUS_COLOR.CONCLUIDO} />
+            </div>
+          ))}
+        </SectionCard>
+      )}
+    </div>
+  );
+}
+
+// ─── ROTEADOR POR CARGO ───────────────────────────────────────────────────────
+
+function DashboardContent({ cargo, profile }: { cargo: Cargo; profile: UserProfile }) {
+  switch (cargo) {
+    case "ADMIN":   return <AdminDashboard   profile={profile} />;
+    case "GERENTE": return <GerenteDashboard profile={profile} />;
+    case "DEV":     return <DevDashboard     profile={profile} />;
+    case "QA":      return <QADashboard      profile={profile} />;
+  }
+}
+
+// ─── FORM STATE ───────────────────────────────────────────────────────────────
+
+interface FormState {
+  email: string;
+  password: string;
+  nome: string;
+  regEmail: string;
+}
+
+// ─── APP PRINCIPAL ────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [view, setView]           = useState<"login" | "dashboard">("login");
+  const [form, setForm]           = useState<FormState>({ email: "", password: "", nome: "", regEmail: "" });
+  const [profile, setProfile]     = useState<UserProfile | null>(null);
+  const [error, setError]         = useState("");
+  const [loading, setLoading]     = useState(false);
+  const [isRegister, setIsRegister] = useState(false);
+
+  useEffect(() => {
+    if (localStorage.getItem("access_token")) fetchProfile();
+  }, []);
+
+  const fetchProfile = async () => {
+    try {
+      const p = await apiFetch("/profile/") as UserProfile;
+      setProfile(p);
+      setView("dashboard");
+    } catch {
+      localStorage.removeItem("access_token");
+      localStorage.removeItem("refresh_token");
+    }
+  };
+
+  const handleLogin = async () => {
+    setError(""); setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/token/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.email, password: form.password }),
+      });
+      const data = await res.json() as { access?: string; refresh?: string; detail?: string; error?: string };
+      if (!res.ok) throw data;
+      localStorage.setItem("access_token", data.access!);
+      localStorage.setItem("refresh_token", data.refresh!);
+      await fetchProfile();
+    } catch (err: unknown) {
+      const e = err as { detail?: string; error?: string };
+      setError(e?.detail ?? e?.error ?? "Credenciais inválidas.");
+    } finally { setLoading(false); }
+  };
+
+  const handleRegister = async () => {
+    setError(""); setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/register/`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: form.regEmail, password: form.password, nome: form.nome, cargo: "DEV" }),
+      });
+      const data = await res.json() as { error?: string; detail?: string };
+      if (!res.ok) throw data;
+      setIsRegister(false);
+      setError("✅ Conta criada! Faça login.");
+    } catch (err: unknown) {
+      const e = err as { detail?: string; error?: string };
+      setError(e?.error ?? e?.detail ?? "Erro ao registrar.");
+    } finally { setLoading(false); }
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+    setProfile(null);
+    setView("login");
+    setForm({ email: "", password: "", nome: "", regEmail: "" });
+  };
+
+  if (view === "dashboard" && profile) {
+    const cargo = profile.cargo;
+    return (
+      <div style={{ display: "flex", minHeight: "100vh", background: "#F9FAFB", fontFamily: "'Segoe UI', system-ui, sans-serif" }}>
+        <aside style={{
+          width: 220, background: "#fff", borderRight: "1px solid #E5E7EB",
+          display: "flex", flexDirection: "column", justifyContent: "space-between",
+          position: "sticky", top: 0, height: "100vh",
+        }}>
+          <div>
+            <div style={{ padding: "1.25rem 1rem", borderBottom: "1px solid #E5E7EB", display: "flex", alignItems: "center", gap: 10 }}>
+              <div style={{ width: 32, height: 32, background: "#2563EB", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth="2">
+                  <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+                  <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+                </svg>
+              </div>
+              <span style={{ fontWeight: 700, fontSize: 17, color: "#111827" }}>Lazuli</span>
+            </div>
+
+            <nav style={{ padding: "1rem 0.75rem" }}>
+              {([
+                { label: "Dashboard", icon: "🏠" },
+                { label: "Projetos",  icon: "📁" },
+                { label: "Tasks",     icon: "✅" },
+                { label: "Sprints",   icon: "🏃" },
+                ...(cargo === "ADMIN" ? [{ label: "Usuários", icon: "👥" }] : []),
+              ]).map((item) => (
+                <div key={item.label} style={{
+                  display: "flex", alignItems: "center", gap: 10,
+                  padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+                  fontSize: 14, fontWeight: 500, color: "#374151", marginBottom: 2,
+                }}>
+                  <span>{item.icon}</span>{item.label}
+                </div>
+              ))}
+            </nav>
+          </div>
+
+          <div style={{ padding: "1rem", borderTop: "1px solid #E5E7EB" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+              <Avatar name={profile.username} size={34} />
+              <div style={{ overflow: "hidden" }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#111827", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {profile.username}
+                </div>
+                <Badge label={cargo} colors={CARGO_COLOR[cargo]} />
+              </div>
+            </div>
+            <button onClick={handleLogout} style={{
+              width: "100%", background: "none", border: "1px solid #FCA5A5",
+              borderRadius: 8, padding: "8px 0", color: "#EF4444",
+              cursor: "pointer", fontSize: 13, fontWeight: 500,
+            }}>Sair</button>
+          </div>
+        </aside>
+
+        <main style={{ flex: 1, padding: "2rem", maxWidth: 1000, overflowY: "auto" }}>
+          <DashboardContent cargo={cargo} profile={profile} />
+        </main>
+      </div>
+    );
+  }
+
+  const inputStyle: CSSProperties = {
+    padding: "11px 14px", borderRadius: 10, border: "1px solid #D1D5DB",
+    fontSize: 14, color: "#111827", outline: "none", width: "100%", boxSizing: "border-box",
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center",
+      background: "linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)",
+      fontFamily: "'Segoe UI', system-ui, sans-serif", padding: "1rem",
+    }}>
+      <div style={{
+        background: "#fff", borderRadius: 20, border: "1px solid #E5E7EB",
+        padding: "2.5rem", width: "100%", maxWidth: 380,
+        boxShadow: "0 4px 24px rgba(0,0,0,0.06)",
+      }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: "2rem" }}>
+          <div style={{ width: 36, height: 36, background: "#2563EB", borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth="2">
+              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/>
+              <rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+            </svg>
+          </div>
+          <span style={{ fontWeight: 700, fontSize: 20, color: "#111827" }}>Lazuli</span>
+        </div>
+
+        <h2 style={{ margin: "0 0 1.5rem", fontSize: 18, fontWeight: 700, color: "#111827" }}>
+          {isRegister ? "Criar conta" : "Entrar"}
+        </h2>
+
+        {error && (
+          <div style={{
+            padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 16,
+            background: error.startsWith("✅") ? "#D1FAE5" : "#FEE2E2",
+            color:      error.startsWith("✅") ? "#065F46"  : "#991B1B",
+          }}>{error}</div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {isRegister && (
+            <input placeholder="Nome completo" value={form.nome}
+              onChange={(e) => setForm({ ...form, nome: e.target.value })}
+              style={inputStyle} />
+          )}
+          <input placeholder="Email" type="email"
+            value={isRegister ? form.regEmail : form.email}
+            onChange={(e) => setForm(isRegister ? { ...form, regEmail: e.target.value } : { ...form, email: e.target.value })}
+            style={inputStyle} />
+          <input placeholder="Senha" type="password" value={form.password}
+            onChange={(e) => setForm({ ...form, password: e.target.value })}
+            onKeyDown={(e) => { if (e.key === "Enter") isRegister ? handleRegister() : handleLogin(); }}
+            style={inputStyle} />
+          <button
+            onClick={isRegister ? handleRegister : handleLogin}
+            disabled={loading}
+            style={{
+              padding: "12px", background: loading ? "#93C5FD" : "#2563EB",
+              color: "#fff", border: "none", borderRadius: 10,
+              fontSize: 14, fontWeight: 600, cursor: loading ? "not-allowed" : "pointer", marginTop: 4,
+            }}
+          >
+            {loading ? "Aguarde..." : isRegister ? "Criar conta" : "Entrar"}
+          </button>
+        </div>
+
+        <p style={{ textAlign: "center", marginTop: "1.25rem", fontSize: 13, color: "#6B7280" }}>
+          {isRegister ? "Já tem conta? " : "Não tem conta? "}
+          <span onClick={() => { setIsRegister(!isRegister); setError(""); }}
+            style={{ color: "#2563EB", cursor: "pointer", fontWeight: 500 }}>
+            {isRegister ? "Fazer login" : "Cadastre-se"}
+          </span>
+        </p>
+      </div>
+    </div>
+  );
+}
 ----- frontend/src/api.ts -----
 import axios from 'axios'
 
@@ -314,6 +1099,91 @@ api.interceptors.request.use((config) => {
 })
 
 export default api
+----- frontend/src/components/ui.tsx -----
+// Correção: Importação de tipos do React
+import type { CSSProperties, ReactNode } from 'react';
+
+// Separação de imports de '../types'
+import { PRIORIDADE_COLOR, STATUS_COLOR, TASK_STATUS_LABEL, PRIORIDADE_LABEL } from '../types.ts';
+import type { Prioridade, TaskStatus } from '../types.ts';
+
+export function Badge({ label, colors, size = 'sm' }: {
+  label: string;
+  colors?: { bg: string; text: string };
+  size?: 'sm' | 'md';
+}) {
+  const style: CSSProperties = {
+    display: 'inline-flex', alignItems: 'center',
+    padding: size === 'sm' ? '2px 8px' : '4px 12px',
+    borderRadius: 20,
+    fontSize: size === 'sm' ? 11 : 12,
+    fontWeight: 600,
+    background: colors?.bg ?? '#F3F4F6',
+    color: colors?.text ?? '#374151',
+    letterSpacing: 0.3,
+    whiteSpace: 'nowrap' as const,
+  };
+  return <span style={style}>{label}</span>;
+}
+
+export function StatusBadge({ status }: { status: TaskStatus }) {
+  return <Badge label={TASK_STATUS_LABEL[status]} colors={STATUS_COLOR[status]} />;
+}
+
+export function PrioridadeBadge({ prioridade }: { prioridade: Prioridade }) {
+  return <Badge label={PRIORIDADE_LABEL[prioridade]} colors={PRIORIDADE_COLOR[prioridade]} />;
+}
+
+export function Avatar({ name, size = 36 }: { name: string; size?: number }) {
+  const initials = name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  const bgColors  = ['#BFDBFE', '#A7F3D0', '#FDE68A', '#FBCFE8', '#DDD6FE'];
+  const txtColors = ['#1E40AF', '#065F46', '#92400E', '#9D174D', '#5B21B6'];
+  const idx = (name.charCodeAt(0) || 0) % bgColors.length;
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%',
+      background: bgColors[idx], color: txtColors[idx],
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.35, fontWeight: 700, flexShrink: 0,
+    }}>{initials}</div>
+  );
+}
+
+export function LoadingSpinner() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', padding: '3rem' }}>
+      <div style={{
+        width: 32, height: 32,
+        border: '3px solid #E5E7EB', borderTop: '3px solid #3B82F6',
+        borderRadius: '50%', animation: 'spin 0.8s linear infinite',
+      }} />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+export function EmptyState({ message, icon = '📭' }: { message: string; icon?: string }) {
+  return (
+    <div style={{ textAlign: 'center', padding: '3rem 1rem', color: '#9CA3AF' }}>
+      <div style={{ fontSize: 32, marginBottom: 8 }}>{icon}</div>
+      <div style={{ fontSize: 13 }}>{message}</div>
+    </div>
+  );
+}
+
+export function SectionCard({ title, children, action }: {
+  title: string; children: ReactNode; action?: ReactNode;
+}) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 14, border: '1px solid #E5E7EB', padding: '1.25rem', marginBottom: 16 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+        <h2 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#111827' }}>{title}</h2>
+        {action}
+      </div>
+      {children}
+    </div>
+  );
+}
 ----- frontend/src/dashboards/Admindashboard.tsx -----
 export default function AdminDashboard() {
   const stats = [
@@ -638,14 +1508,779 @@ export default function QADashboard() {
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
-import App from './App.tsx'
+import App from './Dashboard.tsx'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />
   </StrictMode>,
 )
+----- frontend/src/modals/CardDetailModal.tsx -----
+import React, { useState, useEffect } from 'react';
+import { X, ChevronUp, AlertCircle } from 'lucide-react';
+import api from '../api';
+// 1. Importe os tipos específicos
+import type { Task, TaskStatus, Prioridade } from '../types';
 
+interface CardDetailModalProps {
+  cardId: number | null;
+  onClose: () => void;
+}
+
+export default function CardDetailModal({ cardId, onClose }: CardDetailModalProps) {
+  const [task, setTask] = useState<Task | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [updating, setUpdating] = useState(false);
+
+  // 2. Altere a tipagem dos estados. Eles podem ser o tipo específico OU uma string vazia inicialmente.
+  const [editStatus, setEditStatus] = useState<TaskStatus | ''>('');
+  const [editPrioridade, setEditPrioridade] = useState<Prioridade | ''>('');
+
+  useEffect(() => {
+    if (!cardId) return;
+    setLoading(true);
+    api.get<Task>(`/tasks/${cardId}/`)
+      .then(res => {
+        setTask(res.data);
+        setEditStatus(res.data.status);
+        setEditPrioridade(res.data.prioridade);
+      })
+      .finally(() => setLoading(false));
+  }, [cardId]);
+
+  const handleUpdate = async () => {
+    if (!task) return;
+    setUpdating(true);
+    try {
+      await api.patch(`/tasks/${task.id}/`, {
+        // 3. O axios envia como string, o backend aceita string, então aqui está ok.
+        // Mas para o setTask local, precisamos garantir o tipo.
+        status: editStatus,
+        prioridade: editPrioridade
+      });
+
+      // 4. Aqui o TypeScript reclama se tentarmos passar uma string vazia para Task.status.
+      // Usamos "as TaskStatus" para garantir que o tipo está correto, pois sabemos que o select só envia valores válidos.
+      setTask({ 
+        ...task, 
+        status: editStatus as TaskStatus, 
+        prioridade: editPrioridade as Prioridade 
+      });
+      
+      alert("Atualizado com sucesso!");
+    } catch (error) {
+      alert("Erro ao atualizar");
+    } finally {
+      setUpdating(false);
+    }
+  };
+
+  if (loading) return <div className="flex items-center justify-center h-full">Carregando...</div>;
+  if (!task) return null;
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl h-[80vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50">
+          <span className="font-mono text-xs text-gray-500 bg-gray-200 px-2 py-1 rounded">#{task.id}</span>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+        
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-8">
+          <h1 className="text-2xl font-bold text-slate-900 mb-6">{task.titulo}</h1>
+          
+          <div className="grid grid-cols-2 gap-6 mb-8">
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Status</label>
+              <select 
+                className="w-full p-2 border rounded text-sm"
+                value={editStatus}
+                // 5. Fazemos o cast aqui no onChange também
+                onChange={e => setEditStatus(e.target.value as TaskStatus)}
+              >
+                <option value="BACKLOG">Backlog</option>
+                <option value="TODO">A Fazer</option>
+                <option value="EM_ANDAMENTO">Em Progresso</option>
+                <option value="REVISAO">Revisão</option>
+                <option value="CONCLUIDO">Concluído</option>
+                <option value="BLOQUEADO">Bloqueado</option>
+              </select>
+            </div>
+            
+            <div>
+              <label className="block text-xs font-bold text-gray-500 uppercase mb-2">Prioridade</label>
+              <select 
+                className="w-full p-2 border rounded text-sm"
+                value={editPrioridade}
+                // 6. E aqui também
+                onChange={e => setEditPrioridade(e.target.value as Prioridade)}
+              >
+                <option value="BAIXA">Baixa</option>
+                <option value="MEDIA">Média</option>
+                <option value="ALTA">Alta</option>
+                <option value="CRITICA">Crítica</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="mb-8">
+            <h3 className="text-sm font-bold text-slate-800 mb-2 border-b pb-2">Descrição</h3>
+            <p className="text-gray-600 whitespace-pre-wrap">{task.descricao || "Sem descrição."}</p>
+          </div>
+          
+          {task.responsavel_nome && (
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 mb-2">Responsável</h3>
+              <div className="flex items-center">
+                <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-800 flex items-center justify-center font-bold text-sm mr-2">
+                  {task.responsavel_nome.substring(0,2).toUpperCase()}
+                </div>
+                <span className="text-sm font-medium text-slate-700">{task.responsavel_nome}</span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+          <button 
+            onClick={handleUpdate} 
+            disabled={updating}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-medium shadow-sm disabled:opacity-50"
+          >
+            {updating ? 'Salvando...' : 'Salvar Alterações'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+----- frontend/src/modals/CreateCardModal.tsx -----
+import React, { useState } from 'react';
+import { X } from 'lucide-react';
+import api from '../api';
+
+interface CreateCardModalProps {
+  projetoId: number | null;
+  onClose: () => void;
+  onSuccess: () => void; // Callback para atualizar a lista
+}
+
+export default function CreateCardModal({ projetoId, onClose, onSuccess }: CreateCardModalProps) {
+  const [form, setForm] = useState({ titulo: '', descricao: '', prioridade: 'MEDIA' as any });
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!projetoId) return alert("Selecione um projeto primeiro");
+    if (!form.titulo) return alert("Título obrigatório");
+
+    setLoading(true);
+    try {
+      // O backend espera: titulo, descricao, prioridade, projeto_id
+      await api.post('/tasks/', {
+        titulo: form.titulo,
+        descricao: form.descricao,
+        prioridade: form.prioridade,
+        projeto_id: projetoId,
+        // O status padrão no backend é BACKLOG
+      });
+      onSuccess();
+      onClose();
+    } catch (error) {
+      alert("Erro ao criar task");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col">
+        <div className="flex items-center justify-between p-6 border-b border-gray-100">
+          <h2 className="text-xl font-bold text-slate-800">Criar Nova Task</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
+        </div>
+        
+        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Título *</label>
+            <input 
+              type="text" 
+              className="w-full p-2.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 outline-none" 
+              value={form.titulo}
+              onChange={e => setForm({ ...form, titulo: e.target.value })}
+              placeholder="Título da task"
+            />
+          </div>
+          
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição</label>
+            <textarea 
+              className="w-full p-2.5 border border-gray-300 rounded-md h-24 resize-none text-sm focus:ring-blue-500 outline-none" 
+              value={form.descricao}
+              onChange={e => setForm({ ...form, descricao: e.target.value })}
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Prioridade</label>
+            <select 
+              className="w-full p-2.5 border border-gray-300 rounded-md bg-white text-sm outline-none"
+              value={form.prioridade}
+              onChange={e => setForm({ ...form, prioridade: e.target.value })}
+            >
+              <option value="BAIXA">Baixa</option>
+              <option value="MEDIA">Média</option>
+              <option value="ALTA">Alta</option>
+              <option value="CRITICA">Crítica</option>
+            </select>
+          </div>
+
+          <div className="pt-4 flex justify-end space-x-3">
+            <button type="button" onClick={onClose} className="px-4 py-2 border text-gray-700 rounded-md hover:bg-gray-50">Cancelar</button>
+            <button type="submit" disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
+              {loading ? 'Criando...' : 'Criar Task'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+----- frontend/src/modals/EstimateDifficultyModal.tsx -----
+
+----- frontend/src/types.ts -----
+// src/types.ts
+
+export interface UserProfile {
+  id: number;
+  username: string;
+  email: string;
+  cargo: Cargo;
+}
+
+export interface Projeto {
+  id: number;
+  nome: string;
+  descricao?: string;
+  criado_em?: string;
+  member_count?: number;
+  status?: string;
+}
+
+export interface Sprint {
+  id: number;
+  nome: string;
+  status: "PLANEJADA" | "ATIVA" | "CONCLUIDA";
+  projeto_id: number;
+  total_tasks?: number;
+  concluidas?: number;
+  progresso?: number;
+  data_inicio?: string;
+  data_fim?: string;
+  criado_em?: string;
+}
+
+export interface Task {
+  id: number;
+  titulo: string;
+  descricao?: string;
+  status: TaskStatus;
+  prioridade: Prioridade;
+  responsavel_id?: number;
+  responsavel_nome?: string;
+  sprint_id?: number;
+  projeto_id?: number;
+  backlog_id?: number;
+  posicao?: number;
+  criado_em?: string;
+}
+
+export interface Subtask {
+  id: number;
+  task_id: number;
+  titulo: string;
+  status: "TODO" | "EM_ANDAMENTO" | "CONCLUIDO";
+  posicao?: number;
+  responsavel_id?: number;
+  responsavel_nome?: string;
+}
+
+export interface Comentario {
+  id: number;
+  task_id: number;
+  usuario_id: number;
+  usuario_nome: string;
+  usuario_avatar?: string;
+  texto: string;
+  criado_em: string;
+  editado_em?: string;
+}
+
+export interface Usuario {
+  id: number;
+  nome: string;
+  email: string;
+  cargo: Cargo;
+  ativo: boolean;
+  criado_em?: string;
+}
+
+export interface AdminStats {
+  total_usuarios: number;
+  total_projetos: number;
+  sprints_ativas: number;
+  convites_pendentes: number;
+}
+
+export type Cargo = "ADMIN" | "GERENTE" | "DEV" | "QA";
+export type TaskStatus = "BACKLOG" | "TODO" | "EM_ANDAMENTO" | "REVISAO" | "CONCLUIDO" | "BLOQUEADO";
+export type Prioridade = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
+
+export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
+  BACKLOG:      "Backlog",
+  TODO:         "A Fazer",
+  EM_ANDAMENTO: "Em Progresso",
+  REVISAO:      "Revisão",
+  CONCLUIDO:    "Concluído",
+  BLOQUEADO:    "Bloqueado",
+};
+
+export const PRIORIDADE_LABEL: Record<Prioridade, string> = {
+  BAIXA:   "Baixa",
+  MEDIA:   "Média",
+  ALTA:    "Alta",
+  CRITICA: "Urgente",
+};
+
+export const CARGO_COLOR: Record<Cargo, { bg: string; text: string }> = {
+  ADMIN:   { bg: "#EDE9FE", text: "#5B21B6" },
+  GERENTE: { bg: "#DBEAFE", text: "#1D4ED8" },
+  DEV:     { bg: "#D1FAE5", text: "#065F46" },
+  QA:      { bg: "#FEF3C7", text: "#92400E" },
+};
+
+export const STATUS_COLOR: Record<TaskStatus, { bg: string; text: string }> = {
+  BACKLOG:      { bg: "#F3F4F6", text: "#374151" },
+  TODO:         { bg: "#DBEAFE", text: "#1E40AF" },
+  EM_ANDAMENTO: { bg: "#FEF3C7", text: "#92400E" },
+  REVISAO:      { bg: "#EDE9FE", text: "#5B21B6" },
+  CONCLUIDO:    { bg: "#D1FAE5", text: "#065F46" },
+  BLOQUEADO:    { bg: "#FEE2E2", text: "#991B1B" },
+};
+
+export const PRIORIDADE_COLOR: Record<Prioridade, { bg: string; text: string }> = {
+  BAIXA:   { bg: "#D1FAE5", text: "#065F46" },
+  MEDIA:   { bg: "#DBEAFE", text: "#1E40AF" },
+  ALTA:    { bg: "#FEF3C7", text: "#92400E" },
+  CRITICA: { bg: "#FEE2E2", text: "#991B1B" },
+};
+----- frontend/src/views/AdminProjectsView.tsx -----
+import React, { useState, useEffect } from 'react';
+import { Search, Plus, Edit2, Trash2 } from 'lucide-react';
+import api from '../api';
+import type { Projeto } from '../types';
+
+export default function AdminProjectsView() {
+  const [projects, setProjects] = useState<Projeto[]>([]);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  useEffect(() => {
+    api.get<Projeto[]>('/projetos/')
+      .then(res => setProjects(res.data))
+      .catch(console.error);
+  }, []);
+
+  const filteredProjects = projects.filter(p => 
+    p.nome.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col">
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-1">Gerenciamento de Projetos</h1>
+          <p className="text-gray-500 text-sm">Visão geral e controle de todos os projetos.</p>
+        </div>
+        <div className="flex space-x-3">
+          <div className="relative">
+            <Search size={16} className="absolute left-3 top-2.5 text-gray-400" />
+            <input 
+              type="text" 
+              className="pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm w-64 focus:ring-blue-500" 
+              placeholder="Buscar projetos..."
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
+          </div>
+          {/* Botão Novo Projeto implementaria POST /api/projetos/ */}
+          <button className="bg-blue-600 text-white px-4 py-2 rounded-md text-sm font-medium flex items-center">
+            <Plus size={18} className="mr-2" /> Novo Projeto
+          </button>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
+        <div className="overflow-x-auto flex-1 p-2">
+          <table className="min-w-full">
+            <thead className="border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Nome do Projeto</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Criado em</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {filteredProjects.map((project) => (
+                <tr key={project.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 text-sm font-semibold text-slate-800">
+                    <div className="flex items-center">
+                      <div className="w-1 h-6 rounded-sm mr-3 bg-green-500"></div>
+                      {project.nome}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {project.criado_em ? new Date(project.criado_em).toLocaleDateString() : '-'}
+                  </td>
+                  <td className="px-6 py-4 text-right text-sm font-medium">
+                    <div className="flex justify-end space-x-2">
+                      <button className="text-gray-400 hover:text-blue-600 p-1"><Edit2 size={16} /></button>
+                      <button className="text-gray-400 hover:text-red-600 p-1"><Trash2 size={16} /></button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+----- frontend/src/views/BacklogView.tsx -----
+import React, { useState, useEffect } from 'react';
+import { Search, Plus, MoreVertical } from 'lucide-react';
+import api from '../api';
+import type { Task } from '../types';
+import { PRIORIDADE_LABEL } from '../types';
+
+interface BacklogViewProps {
+  projetoId: number | null;
+  onNewCard: () => void;
+  onOpenCard: (id: number) => void;
+}
+
+export default function BacklogView({ projetoId, onNewCard, onOpenCard }: BacklogViewProps) {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [search, setSearch] = useState('');
+
+  useEffect(() => {
+    if (!projetoId) return;
+    setLoading(true);
+    api.get<Task[]>(`/tasks/?projeto_id=${projetoId}&status=BACKLOG`)
+      .then(res => setTasks(res.data))
+      .finally(() => setLoading(false));
+  }, [projetoId]);
+
+  const filteredTasks = tasks.filter(t => t.titulo.toLowerCase().includes(search.toLowerCase()));
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col">
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-1">Backlog de Tasks</h1>
+          <p className="text-gray-500 text-sm">Gestão de tasks não atribuídas à sprint.</p>
+        </div>
+        <button onClick={onNewCard} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-medium flex items-center shadow-sm">
+          <Plus size={18} className="mr-2" /> Nova Task
+        </button>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
+        <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+          <div className="relative w-96">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search size={16} className="text-gray-400" />
+            </div>
+            <input 
+              type="text" 
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500" 
+              placeholder="Buscar no backlog..." 
+            />
+          </div>
+        </div>
+
+        <div className="overflow-x-auto flex-1">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">ID</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Título</th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Prioridade</th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Ações</th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredTasks.map((task) => (
+                <tr key={task.id} className="hover:bg-gray-50 cursor-pointer" onClick={() => onOpenCard(task.id)}>
+                  <td className="px-6 py-4 text-sm text-gray-500 font-mono">#{task.id}</td>
+                  <td className="px-6 py-4 text-sm font-semibold text-slate-800">{task.titulo}</td>
+                  <td className="px-6 py-4 text-sm">
+                    <span className={`px-2 py-1 rounded-full text-xs font-semibold ${
+                      task.prioridade === 'ALTA' || task.prioridade === 'CRITICA' ? 'bg-red-100 text-red-800' : 
+                      task.prioridade === 'MEDIA' ? 'bg-orange-100 text-orange-800' : 'bg-gray-100 text-gray-800'
+                    }`}>
+                      {PRIORIDADE_LABEL[task.prioridade]}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 text-right text-sm font-medium">
+                    <button className="text-gray-400 hover:text-blue-600"><MoreVertical size={16} /></button>
+                  </td>
+                </tr>
+              ))}
+              {filteredTasks.length === 0 && !loading && (
+                <tr><td colSpan={4} className="px-6 py-8 text-center text-gray-400">Backlog vazio</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+----- frontend/src/views/BoardView.tsx -----
+import React, { useState, useEffect } from 'react';
+import { Filter, MoreHorizontal, MessageSquare, Plus, CheckSquare, List, Users } from 'lucide-react';
+import api from '../api';
+import type { Task, Usuario } from '../types';
+import { Avatar } from '../components/ui'; // Usando o avatar existente
+
+// Mapeamento de Status Backend -> Frontend
+const STATUS_MAP: Record<string, string> = {
+  'TODO': 'A Fazer',
+  'EM_ANDAMENTO': 'Em Progresso',
+  'REVISAO': 'Revisão',
+  'CONCLUIDO': 'Concluído',
+  'BACKLOG': 'Backlog',
+  'BLOQUEADO': 'Bloqueado'
+};
+
+// Mapeamento Reverso (Frontend -> Backend)
+const REVERSE_STATUS_MAP: Record<string, string> = Object.fromEntries(
+  Object.entries(STATUS_MAP).map(([k, v]) => [v, k])
+);
+
+interface BoardViewProps {
+  sprintId: number | null;
+  projetoId: number | null;
+  onOpenCard: (id: number) => void;
+  onNewCard: () => void;
+  isAdmin: boolean;
+}
+
+export default function BoardView({ sprintId, projetoId, onOpenCard, onNewCard, isAdmin }: BoardViewProps) {
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [viewMode, setViewMode] = useState<'kanban' | 'list'>('kanban');
+
+  useEffect(() => {
+    if (!sprintId) return;
+    setLoading(true);
+    api.get<Task[]>(`/tasks/?sprint_id=${sprintId}`)
+      .then(res => setTasks(res.data))
+      .catch(err => console.error("Erro ao carregar tasks:", err))
+      .finally(() => setLoading(false));
+  }, [sprintId]);
+
+  const columns = [
+    { id: 'A Fazer', title: 'A Fazer' },
+    { id: 'Em Progresso', title: 'Em Progresso' },
+    { id: 'Revisão', title: 'Revisão' },
+    { id: 'Concluído', title: 'Concluído' },
+  ];
+
+  const getPriorityWeight = (priority: string) => {
+    switch (priority) {
+      case 'CRITICA': return 4;
+      case 'ALTA': return 3;
+      case 'MEDIA': return 2;
+      case 'BAIXA': return 1;
+      default: return 0;
+    }
+  };
+
+  const sortCards = (cards: Task[]) => {
+    return [...cards].sort((a, b) => {
+      const pA = getPriorityWeight(a.prioridade);
+      const pB = getPriorityWeight(b.prioridade);
+      if (pA !== pB) return pB - pA;
+      // Fallback sort por data de criação se não houver due_date
+      return new Date(b.criado_em || 0).getTime() - new Date(a.criado_em || 0).getTime();
+    });
+  };
+
+  if (loading) return <div className="p-8 text-center text-gray-500">Carregando quadro...</div>;
+  if (!sprintId) return <div className="p-8 text-center text-gray-500">Selecione uma sprint ativa.</div>;
+
+  return (
+    <div className="h-full flex flex-col pt-6 px-6 overflow-hidden">
+      <div className="flex justify-between items-center mb-6 shrink-0">
+        <div>
+          <div className="flex items-center space-x-3 mb-1">
+            <span className="bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded">Sprint Ativa</span>
+            <span className="text-gray-500 text-sm">ID: {sprintId}</span>
+          </div>
+          <h1 className="text-3xl font-bold text-slate-900">Quadro da Sprint</h1>
+        </div>
+        
+        <div className="flex items-center space-x-4">
+          <div className="flex bg-gray-100 p-1 rounded-md mr-2">
+            <button onClick={() => setViewMode('kanban')} className={`flex items-center px-3 py-1.5 text-sm font-medium rounded-sm transition ${viewMode === 'kanban' ? 'bg-white shadow-sm text-slate-800' : 'text-gray-500'}`}>
+              <CheckSquare size={16} className="mr-2" /> Kanban
+            </button>
+            <button onClick={() => setViewMode('list')} className={`flex items-center px-3 py-1.5 text-sm font-medium rounded-sm transition ${viewMode === 'list' ? 'bg-white shadow-sm text-slate-800' : 'text-gray-500'}`}>
+              <List size={16} className="mr-2" /> Lista
+            </button>
+          </div>
+          <button className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded shadow-sm text-sm font-medium flex items-center" onClick={onNewCard}>
+            <Plus size={16} className="mr-2" /> Nova Task
+          </button>
+        </div>
+      </div>
+
+      {viewMode === 'kanban' ? (
+        <div className="flex flex-1 space-x-6 overflow-x-auto pb-6">
+          {columns.map(col => {
+            const colStatus = REVERSE_STATUS_MAP[col.id];
+            const colCards = sortCards(tasks.filter(t => t.status === colStatus));
+            
+            return (
+              <div key={col.id} className="w-80 flex flex-col shrink-0">
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="font-bold text-slate-800 text-lg">{col.title} <span className="text-gray-400 text-sm ml-2">({colCards.length})</span></h2>
+                  <button className="text-gray-400 hover:text-gray-600"><MoreHorizontal size={20} /></button>
+                </div>
+                <div className="flex-1 bg-gray-100 rounded-lg p-3 overflow-y-auto space-y-3 border border-gray-200">
+                  {colCards.map(card => (
+                    <div key={card.id} onClick={() => onOpenCard(card.id)} className="bg-white p-4 rounded-md shadow-sm border border-gray-200 cursor-pointer hover:shadow hover:border-blue-300 transition group relative">
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-xs px-2 py-0.5 rounded font-medium ${card.prioridade === 'ALTA' || card.prioridade === 'CRITICA' ? 'bg-orange-50 text-orange-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {card.prioridade}
+                        </span>
+                      </div>
+                      <h3 className="text-sm font-semibold text-slate-800 leading-tight mb-4 group-hover:text-blue-600">
+                        {card.titulo}
+                      </h3>
+                      <div className="flex items-center justify-between mt-auto">
+                        <span className="text-xs text-gray-500 font-mono">#{card.id}</span>
+                        {card.responsavel_nome && <Avatar name={card.responsavel_nome} size={24} />}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex-1 overflow-y-auto bg-white rounded-lg border border-gray-200 mb-6">
+           {/* Implementação simplificada da lista para não extender demais o código, 
+               segue a mesma lógica de filtro do Kanban acima */}
+           <div className="p-4 text-center text-gray-500">Modo lista não implementado nesta demo.</div>
+        </div>
+      )}
+    </div>
+  );
+}
+----- frontend/src/views/SprintHistoryView.tsx -----
+import React, { useState, useEffect } from 'react';
+import { Archive } from 'lucide-react';
+import api from '../api';
+import type { Sprint } from '../types';
+
+export default function SprintHistoryView() {
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Buscando sprints. Filtramos no frontend se necessário, ou passamos ?status=CONCLUIDA
+    api.get<Sprint[]>('/sprints/')
+      .then(res => {
+        // Filtra para mostrar histórico (concluídas) ou todas
+        setSprints(res.data); 
+        setLoading(false);
+      })
+      .catch(err => {
+        console.error(err);
+        setLoading(false);
+      });
+  }, []);
+
+  if (loading) return <div className="p-8">Carregando histórico...</div>;
+
+  return (
+    <div className="p-8 max-w-5xl mx-auto h-full flex flex-col">
+      <div className="flex justify-between items-start mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-1">Histórico de Sprints</h1>
+          <p className="text-gray-500 text-sm">Acompanhe as entregas realizadas.</p>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg shadow-sm flex flex-col flex-1 overflow-hidden">
+        <div className="overflow-x-auto flex-1 p-2">
+          <table className="min-w-full">
+            <thead className="border-b border-gray-200">
+              <tr>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Sprint</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Período</th>
+                <th className="px-6 py-3 text-left text-xs font-semibold text-gray-500 uppercase">Progresso</th>
+                <th className="px-6 py-3 text-right text-xs font-semibold text-gray-500 uppercase">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {sprints.map((sprint) => (
+                <tr key={sprint.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 text-sm font-semibold text-slate-800">
+                    <div className="flex items-center">
+                      <Archive size={16} className="text-gray-400 mr-2" />
+                      {sprint.nome}
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    {sprint.data_inicio && new Date(sprint.data_inicio).toLocaleDateString()} - {sprint.data_fim && new Date(sprint.data_fim).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4 text-sm text-gray-600">
+                    <div className="flex items-center">
+                      <div className="w-24 bg-gray-200 rounded-full h-2 mr-2">
+                        <div className="bg-blue-600 h-2 rounded-full" style={{ width: `${sprint.progresso || 0}%` }}></div>
+                      </div>
+                      <span>{Math.round(sprint.progresso || 0)}%</span>
+                    </div>
+                  </td>
+                  <td className="px-6 py-4 text-right">
+                    <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
+                      sprint.status === 'ATIVA' ? 'bg-green-100 text-green-800' : 
+                      sprint.status === 'CONCLUIDA' ? 'bg-gray-100 text-gray-800' : 'bg-yellow-100 text-yellow-800'
+                    }`}>
+                      {sprint.status}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 ===== BACKEND (Django) =====
 ----- backend/api/__init__.py -----
@@ -861,6 +2496,9 @@ class Task(models.Model):
     criado_por = models.ForeignKey(Usuario, on_delete=models.DO_NOTHING, db_column='criado_por', related_name='tasks_criadas')
     responsavel = models.ForeignKey(Usuario, on_delete=models.SET_NULL, null=True, blank=True, db_column='responsavel_id', related_name='tasks_responsavel')
     criado_em = models.DateTimeField(auto_now_add=True)
+    story_points = models.IntegerField(null=True, blank=True)
+    due_date = models.DateField(null=True, blank=True) 
+    tags = models.CharField(max_length=255, blank=True, null=True) 
 
     class Meta:
         db_table = 'tasks'
@@ -966,123 +2604,449 @@ from . import views
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
+    # Auth
     path('register/', views.register, name='register'),
     path('profile/', views.profile, name='profile'),
-    
-    # NOVA ROTA: Usa nossa função manual que aceita 'email'
     path('token/', views.custom_token_obtain, name='token_obtain_pair'),
-    
-    # Mantemos o refresh padrão pois ele só precisa do token
     path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
+ 
+    # Projetos
+    path('projetos/', views.projetos_list, name='projetos_list'),
+    path('projetos/<int:pk>/', views.projeto_detail, name='projeto_detail'),
+ 
+    # Sprints
+    path('sprints/', views.sprints_list, name='sprints_list'),
+ 
+    # Tasks
+    path('tasks/', views.tasks_list, name='tasks_list'),
+    path('tasks/minhas/', views.tasks_minhas, name='tasks_minhas'),
+    path('tasks/<int:pk>/', views.task_detail, name='task_detail'),
+ 
+    # Admin
+    path('admin/stats/', views.admin_stats, name='admin_stats'),
+    path('admin/usuarios/', views.admin_usuarios, name='admin_usuarios'),
 ]
 ----- backend/api/views.py -----
+# backend/api/views.py
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from django.core.exceptions import ValidationError
-from django.contrib.auth import authenticate  # <--- IMPORTANTE: Adicionei esta linha
-from rest_framework_simplejwt.tokens import RefreshToken # <--- IMPORTANTE: Adicionei esta linha
+from django.contrib.auth import authenticate
+from rest_framework_simplejwt.tokens import RefreshToken
 
-# IMPORTA SEUS MODELOS
-from .models import Usuario, Cargo
+from .models import Usuario, Cargo, Projeto, ProjetoParticipante, Sprint, Task, Backlog
+
+
+# ─── AUTH ─────────────────────────────────────────────────────────────────────
 
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def register(request):
-    # Pega os dados do request
     email = request.data.get('email')
     password = request.data.get('password')
-    nome = request.data.get('nome') # Seu front envia 'username', mas a tabela é 'nome'
+    nome = request.data.get('nome')
     cargo_nome = request.data.get('cargo', 'DEV').upper()
 
-    # Validação básica
     if not email or not password:
-        return Response(
-            {'error': 'Email e senha são obrigatórios.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({'error': 'Email e senha são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Verifica duplicidade no campo email da tabela usuarios
     if Usuario.objects.filter(email=email).exists():
-        return Response(
-            {'error': 'Email já cadastrado.'},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({'error': 'Email já cadastrado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Busca o cargo na tabela cargos
     try:
         cargo_obj = Cargo.objects.get(nome=cargo_nome)
     except Cargo.DoesNotExist:
         return Response({'error': 'Cargo inválido.'}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
-        # Cria o objeto na tabela usuarios
         user = Usuario(
-            nome=nome or email.split('@')[0], # Fallback para nome se não enviado
+            nome=nome or email.split('@')[0],
             email=email,
             cargo=cargo_obj,
             ativo=True
         )
-        
-        # Criptografa a senha usando o método do model
         user.set_password(password)
         user.save()
-        
         return Response({'message': 'Usuário criado com sucesso!'}, status=status.HTTP_201_CREATED)
-
     except Exception as e:
         return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def profile(request):
-    # request.user agora é uma instância do seu modelo Usuario
-    user = request.user 
-    
-    return Response({
-        'id': user.id,
-        'username': user.nome,       # Mapeia 'nome' do SQL para 'username' do Front
-        'email': user.email,
-        'cargo': user.cargo.nome,    # Pega o nome do cargo (ex: 'ADMIN')
-    })
-
-
-# --- FUNÇÃO DE LOGIN MANUAL ADICIONADA ---
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def custom_token_obtain(request):
-    
-    """
-    View manual de login que aceita 'email' em vez de 'username'.
-    """
     email = request.data.get('email')
     password = request.data.get('password')
 
     if not email or not password:
-        return Response(
-            {'detail': 'Email e senha são obrigatórios.'}, 
-            status=status.HTTP_400_BAD_REQUEST
-        )
+        return Response({'detail': 'Email e senha são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Tenta autenticar usando nosso EmailBackend (configurado no settings.py)
     user = authenticate(request, email=email, password=password)
 
     if user is not None:
-        # Se autenticou, gera os tokens manualmente
         refresh = RefreshToken.for_user(user)
-        
         return Response({
             'refresh': str(refresh),
             'access': str(refresh.access_token),
         })
     else:
-        return Response(
-            {'detail': 'Credenciais inválidas.'}, 
-            status=status.HTTP_401_UNAUTHORIZED
-        )
+        return Response({'detail': 'Credenciais inválidas.'}, status=status.HTTP_401_UNAUTHORIZED)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def profile(request):
+    user = request.user
+    return Response({
+        'id': user.id,
+        'username': user.nome,
+        'email': user.email,
+        'cargo': user.cargo.nome,
+    })
+
+
+# ─── PROJETOS ─────────────────────────────────────────────────────────────────
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def projetos_list(request):
+    user = request.user
+    cargo_nome = user.cargo.nome
+
+    if request.method == 'GET':
+        if cargo_nome == 'ADMIN':
+            # Admin vê todos os projetos
+            projetos = Projeto.objects.all().order_by('-criado_em')
+        else:
+            # Outros veem apenas os que participam
+            participacoes = ProjetoParticipante.objects.filter(
+                usuario=user
+            ).values_list('projeto_id', flat=True)
+            projetos = Projeto.objects.filter(id__in=participacoes).order_by('-criado_em')
+
+        data = [
+            {
+                'id': p.id,
+                'nome': p.nome,
+                'descricao': p.descricao,
+                'criado_em': p.criado_em,
+            }
+            for p in projetos
+        ]
+        return Response(data)
+
+    elif request.method == 'POST':
+        if cargo_nome not in ('ADMIN', 'GERENTE'):
+            return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
+
+        nome = request.data.get('nome')
+        descricao = request.data.get('descricao', '')
+
+        if not nome:
+            return Response({'error': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            projeto = Projeto.objects.create(
+                nome=nome,
+                descricao=descricao,
+                criado_por=user,
+            )
+            # Cria o backlog automaticamente
+            Backlog.objects.create(projeto=projeto, nome='Backlog Principal')
+
+            # Adiciona o criador como participante
+            ProjetoParticipante.objects.create(
+                projeto=projeto,
+                usuario=user,
+                convidado_por=user,
+            )
+
+            return Response({'id': projeto.id, 'nome': projeto.nome}, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def projeto_detail(request, pk):
+    try:
+        projeto = Projeto.objects.get(pk=pk)
+    except Projeto.DoesNotExist:
+        return Response({'error': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response({
+            'id': projeto.id,
+            'nome': projeto.nome,
+            'descricao': projeto.descricao,
+            'criado_em': projeto.criado_em,
+        })
+
+    if request.method == 'PATCH':
+        if 'nome' in request.data:
+            projeto.nome = request.data['nome']
+        if 'descricao' in request.data:
+            projeto.descricao = request.data['descricao']
+        projeto.save()
+        return Response({'id': projeto.id, 'nome': projeto.nome})
+
+    if request.method == 'DELETE':
+        projeto.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ─── SPRINTS ──────────────────────────────────────────────────────────────────
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def sprints_list(request):
+    user = request.user
+    cargo_nome = user.cargo.nome
+
+    if request.method == 'GET':
+        projeto_id = request.query_params.get('projeto_id')
+
+        if cargo_nome == 'ADMIN':
+            sprints = Sprint.objects.all()
+        else:
+            participacoes = ProjetoParticipante.objects.filter(
+                usuario=user
+            ).values_list('projeto_id', flat=True)
+            sprints = Sprint.objects.filter(projeto_id__in=participacoes)
+
+        if projeto_id:
+            sprints = sprints.filter(projeto_id=projeto_id)
+
+        sprints = sprints.order_by('-criado_em')
+
+        data = []
+        for s in sprints:
+            total_tasks = Task.objects.filter(sprint=s).count()
+            concluidas = Task.objects.filter(sprint=s, status='CONCLUIDO').count()
+            progresso = (concluidas / total_tasks * 100) if total_tasks > 0 else 0
+
+            data.append({
+                'id': s.id,
+                'nome': s.nome,
+                'status': s.status,
+                'data_inicio': s.data_inicio,
+                'data_fim': s.data_fim,
+                'projeto_id': s.projeto_id,
+                'total_tasks': total_tasks,
+                'concluidas': concluidas,
+                'progresso': round(progresso, 1),
+            })
+
+        return Response(data)
+
+    elif request.method == 'POST':
+        if cargo_nome not in ('ADMIN', 'GERENTE'):
+            return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
+
+        projeto_id = request.data.get('projeto_id')
+        nome = request.data.get('nome')
+
+        if not projeto_id or not nome:
+            return Response({'error': 'projeto_id e nome são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            projeto = Projeto.objects.get(pk=projeto_id)
+            sprint = Sprint.objects.create(
+                projeto=projeto,
+                nome=nome,
+                data_inicio=request.data.get('data_inicio'),
+                data_fim=request.data.get('data_fim'),
+                status=request.data.get('status', 'PLANEJADA'),
+                criado_por=user,
+            )
+            return Response({'id': sprint.id, 'nome': sprint.nome}, status=status.HTTP_201_CREATED)
+        except Projeto.DoesNotExist:
+            return Response({'error': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+# ─── TASKS ────────────────────────────────────────────────────────────────────
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def tasks_list(request):
+    user = request.user
+    cargo_nome = user.cargo.nome
+
+    if request.method == 'GET':
+        status_filter = request.query_params.get('status')
+        projeto_id = request.query_params.get('projeto_id')
+        sprint_id = request.query_params.get('sprint_id')
+
+        if cargo_nome == 'ADMIN':
+            tasks = Task.objects.all()
+        else:
+            participacoes = ProjetoParticipante.objects.filter(
+                usuario=user
+            ).values_list('projeto_id', flat=True)
+            tasks = Task.objects.filter(projeto_id__in=participacoes)
+
+        if status_filter:
+            tasks = tasks.filter(status=status_filter)
+        if projeto_id:
+            tasks = tasks.filter(projeto_id=projeto_id)
+        if sprint_id:
+            tasks = tasks.filter(sprint_id=sprint_id)
+
+        tasks = tasks.select_related('responsavel', 'criado_por').order_by('-criado_em')
+
+        data = [
+            {
+                'id': t.id,
+                'titulo': t.titulo,
+                'descricao': t.descricao,
+                'status': t.status,
+                'prioridade': t.prioridade,
+                'responsavel_id': t.responsavel_id,
+                'responsavel_nome': t.responsavel.nome if t.responsavel else None,
+                'sprint_id': t.sprint_id,
+                'projeto_id': t.projeto_id,
+                'criado_em': t.criado_em,
+            }
+            for t in tasks
+        ]
+        return Response(data)
+
+    elif request.method == 'POST':
+        projeto_id = request.data.get('projeto_id')
+        titulo = request.data.get('titulo')
+
+        if not projeto_id or not titulo:
+            return Response({'error': 'projeto_id e titulo são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            projeto = Projeto.objects.get(pk=projeto_id)
+            backlog = Backlog.objects.get(projeto=projeto)
+            task = Task.objects.create(
+                projeto=projeto,
+                backlog=backlog,
+                titulo=titulo,
+                descricao=request.data.get('descricao', ''),
+                status=request.data.get('status', 'BACKLOG'),
+                prioridade=request.data.get('prioridade', 'MEDIA'),
+                criado_por=user,
+                sprint_id=request.data.get('sprint_id'),
+                responsavel_id=request.data.get('responsavel_id'),
+            )
+            return Response({'id': task.id, 'titulo': task.titulo}, status=status.HTTP_201_CREATED)
+        except (Projeto.DoesNotExist, Backlog.DoesNotExist) as e:
+            return Response({'error': str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['GET', 'PATCH', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def task_detail(request, pk):
+    try:
+        task = Task.objects.select_related('responsavel').get(pk=pk)
+    except Task.DoesNotExist:
+        return Response({'error': 'Task não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'GET':
+        return Response({
+            'id': task.id,
+            'titulo': task.titulo,
+            'descricao': task.descricao,
+            'status': task.status,
+            'prioridade': task.prioridade,
+            'responsavel_nome': task.responsavel.nome if task.responsavel else None,
+            'sprint_id': task.sprint_id,
+            'projeto_id': task.projeto_id,
+            'criado_em': task.criado_em,
+        })
+
+    if request.method == 'PATCH':
+        if 'status' in request.data:
+            task.status = request.data['status']
+        if 'prioridade' in request.data:
+            task.prioridade = request.data['prioridade']
+        if 'titulo' in request.data:
+            task.titulo = request.data['titulo']
+        if 'descricao' in request.data:
+            task.descricao = request.data['descricao']
+        if 'responsavel_id' in request.data:
+            task.responsavel_id = request.data['responsavel_id']
+        if 'sprint_id' in request.data:
+            task.sprint_id = request.data['sprint_id']
+        task.save()
+        return Response({'id': task.id, 'status': task.status})
+
+    if request.method == 'DELETE':
+        task.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def tasks_minhas(request):
+    """Tasks onde o usuário autenticado é responsável."""
+    user = request.user
+    tasks = Task.objects.filter(responsavel=user).select_related('responsavel').order_by('-criado_em')
+
+    data = [
+        {
+            'id': t.id,
+            'titulo': t.titulo,
+            'status': t.status,
+            'prioridade': t.prioridade,
+            'sprint_id': t.sprint_id,
+            'projeto_id': t.projeto_id,
+        }
+        for t in tasks
+    ]
+    return Response(data)
+
+
+# ─── ADMIN STATS ──────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_stats(request):
+    user = request.user
+    if user.cargo.nome != 'ADMIN':
+        return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
+
+    total_usuarios = Usuario.objects.filter(ativo=True).count()
+    total_projetos = Projeto.objects.count()
+    sprints_ativas = Sprint.objects.filter(status='ATIVA').count()
+
+    return Response({
+        'total_usuarios': total_usuarios,
+        'total_projetos': total_projetos,
+        'sprints_ativas': sprints_ativas,
+        'convites_pendentes': 0,
+    })
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def admin_usuarios(request):
+    user = request.user
+    if user.cargo.nome != 'ADMIN':
+        return Response({'error': 'Sem permissão.'}, status=status.HTTP_403_FORBIDDEN)
+
+    usuarios = Usuario.objects.select_related('cargo').all().order_by('-criado_em')
+    data = [
+        {
+            'id': u.id,
+            'nome': u.nome,
+            'email': u.email,
+            'cargo': u.cargo.nome,
+            'ativo': u.ativo,
+            'criado_em': u.criado_em,
+        }
+        for u in usuarios
+    ]
+    return Response(data)
 ----- backend/backend/__init__.py -----
 
 ----- backend/backend/asgi.py -----
