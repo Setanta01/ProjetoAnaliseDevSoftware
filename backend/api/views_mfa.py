@@ -1,24 +1,10 @@
 # backend/api/views_mfa.py
-"""
-Views de MFA e Google OAuth.
-Importe e registre em urls.py:
 
-    from .views_mfa import (
-        google_login,
-        mfa_status,
-        mfa_setup_totp,
-        mfa_verify_totp,
-        mfa_setup_email,
-        mfa_verify_email,
-        mfa_challenge,
-        mfa_disable,
-    )
-"""
 
 import requests as http_requests
 
 from django.conf import settings
-from django.contrib.auth import authenticate
+from django.utils import timezone
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -26,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from .models import Usuario, Cargo
+from .models import Usuario, ConviteSistema
 from .mfa_utils import (
     gerar_mfa_token,
     verificar_mfa_token,
@@ -50,12 +36,13 @@ def _resposta_mfa_pendente(user: Usuario) -> Response:
     """
     Retorna a resposta padrão quando o usuário passou na senha mas ainda
     precisa completar o segundo fator.
+    Chave padronizada como 'mfa_token' (compatível com mfa_challenge e views.py).
     """
     mfa_token = gerar_mfa_token(user.id)
     return Response({
         'mfa_required': True,
-        'mfa_tipo': user.mfa_tipo,       # 'TOTP' | 'EMAIL'
-        'mfa_token': mfa_token,           # usado em /api/mfa/challenge/
+        'mfa_tipo': user.mfa_tipo,   # 'TOTP' | 'EMAIL'
+        'mfa_token': mfa_token,       # usado em /api/mfa/challenge/
     }, status=status.HTTP_200_OK)
 
 
@@ -72,6 +59,8 @@ def google_login(request):
     valida com a API do Google e autentica / cria o usuário.
 
     Body: { "id_token": "<token do Google>" }
+
+    Criação de usuário exige convite prévio válido (sistema fechado).
     """
     id_token = request.data.get('id_token')
     if not id_token:
@@ -116,26 +105,35 @@ def google_login(request):
     if user is None:
         try:
             user = Usuario.objects.get(email=email)
-            # Vincula o google_id a esse usuário existente
             user.google_id = google_id
             user.save(update_fields=['google_id'])
         except Usuario.DoesNotExist:
             pass
 
-    # Cria novo usuário
+    # Criação de novo usuário exige convite válido
     if user is None:
         try:
-            cargo_dev = Cargo.objects.get(nome='DEV')
-        except Cargo.DoesNotExist:
-            return Response({'error': 'Cargo padrão não encontrado.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            convite = ConviteSistema.objects.get(email=email, usado=False)
+        except ConviteSistema.DoesNotExist:
+            return Response(
+                {'error': 'Nenhum convite válido encontrado para este e-mail.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        # FIX: import de timezone movido para o topo do módulo — era feito dentro
+        # do bloco if, o que funciona mas é anti-padrão e dificulta linting.
+        if convite.expira_em and convite.expira_em < timezone.now():
+            return Response({'error': 'Convite expirado.'}, status=status.HTTP_403_FORBIDDEN)
 
         user = Usuario.objects.create(
             nome=nome,
             email=email,
             google_id=google_id,
-            cargo=cargo_dev,
+            admin=convite.admin,
             ativo=True,
         )
+        convite.usado = True
+        convite.save(update_fields=['usado'])
 
     if not user.ativo:
         return Response({'error': 'Usuário inativo.'}, status=status.HTTP_403_FORBIDDEN)
@@ -184,16 +182,15 @@ def mfa_setup_totp(request):
     """
     user = request.user
 
-    # Gera (ou regenera) o secret — não ativa ainda
     user.gerar_totp_secret()
 
     uri = user.get_totp_uri(issuer='Lazuli')
     qr_base64 = gerar_qrcode_base64(uri)
 
     return Response({
-        'secret': user.totp_secret,          # para digitação manual no app
-        'qrcode': qr_base64,                 # data:image/png;base64,...
-        'uri':    uri,                        # otpauth:// completo
+        'secret': user.totp_secret,
+        'qrcode': qr_base64,
+        'uri':    uri,
     })
 
 
@@ -218,7 +215,6 @@ def mfa_verify_totp(request):
     if not user.verificar_totp(code):
         return Response({'error': 'Código inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Ativa o MFA
     user.mfa_ativo = True
     user.mfa_tipo  = 'TOTP'
     user.save(update_fields=['mfa_ativo', 'mfa_tipo'])
@@ -263,7 +259,6 @@ def mfa_verify_email(request):
     if not user.verificar_otp_email(code):
         return Response({'error': 'Código inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Ativa o MFA
     user.mfa_ativo = True
     user.mfa_tipo  = 'EMAIL'
     user.save(update_fields=['mfa_ativo', 'mfa_tipo'])
@@ -288,7 +283,6 @@ def mfa_challenge(request):
     if not mfa_token or not code:
         return Response({'error': 'mfa_token e code são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Valida o mfa_token ────────────────────────────────────────────────────
     user_id = verificar_mfa_token(mfa_token)
     if user_id is None:
         return Response({'error': 'mfa_token inválido ou expirado. Faça login novamente.'}, status=status.HTTP_401_UNAUTHORIZED)
@@ -301,7 +295,6 @@ def mfa_challenge(request):
     if not user.ativo:
         return Response({'error': 'Usuário inativo.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # ── Valida o código de acordo com o tipo ──────────────────────────────────
     if user.mfa_tipo == 'TOTP':
         valido = user.verificar_totp(code)
     elif user.mfa_tipo == 'EMAIL':
@@ -312,7 +305,6 @@ def mfa_challenge(request):
     if not valido:
         return Response({'error': 'Código inválido ou expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # ── Sucesso → emite tokens definitivos ────────────────────────────────────
     return Response(_emitir_tokens(user), status=status.HTTP_200_OK)
 
 
@@ -355,22 +347,33 @@ def mfa_resend_email(request):
 def mfa_disable(request):
     """
     Desativa o MFA do usuário logado.
-    Exige confirmação de senha para segurança.
+    Exige confirmação de senha para usuários com senha cadastrada.
     Body: { "password": "senha_atual" }
 
     DELETE /api/mfa/disable/
+
+    FIX: a verificação anterior usava request.data.get('password', ''), o que
+    tornava impossível distinguir "campo ausente" de "senha vazia" — ambos
+    retornavam 'Senha incorreta' para usuários com senha cadastrada.
+    Agora verificamos explicitamente se o campo foi enviado.
     """
     user = request.user
-    password = request.data.get('password', '')
 
-    # Usuários que só têm Google (sem senha) podem desativar sem confirmação
-    if user.senha and not user.check_password(password):
-        return Response({'error': 'Senha incorreta.'}, status=status.HTTP_400_BAD_REQUEST)
+    # Usuários que só têm Google (sem senha_hash) podem desativar sem confirmação
+    if user.senha_hash:
+        password = request.data.get('password')
+        if password is None:
+            return Response(
+                {'error': 'O campo "password" é obrigatório para desativar o MFA.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not user.check_password(password):
+            return Response({'error': 'Senha incorreta.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    user.mfa_ativo    = False
-    user.mfa_tipo     = None
-    user.totp_secret  = None
-    user.otp_code     = None
+    user.mfa_ativo     = False
+    user.mfa_tipo      = None
+    user.totp_secret   = None
+    user.otp_code      = None
     user.otp_expira_em = None
     user.save(update_fields=['mfa_ativo', 'mfa_tipo', 'totp_secret', 'otp_code', 'otp_expira_em'])
 
