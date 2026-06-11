@@ -1,15 +1,15 @@
 import axios from 'axios'
+import { demoAdapter } from '@/demo/store'
+import { apiBaseUrl, isDemoMode } from '@/lib/env'
 
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api/',
+  baseURL: apiBaseUrl,
+  ...(isDemoMode ? { adapter: demoAdapter } : {}),
 })
 
-// Injeta o token em toda requisição automaticamente
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`
-  }
+  if (token && !isDemoMode) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 

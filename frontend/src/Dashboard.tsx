@@ -1,362 +1,265 @@
-// frontend/src/Dashboard.tsx
-// Versão atualizada com:
-//   - Botão "Entrar com Google" (usando @react-oauth/google)
-//   - Fluxo MFA Challenge quando o backend retorna mfa_required: true
-//   - Botão de configurações MFA no sidebar
+import { useCallback, useEffect, useState } from 'react'
+import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { BrandMark } from '@/components/app/BrandMark'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { DemoWorkspace } from '@/demo/DemoWorkspace'
+import { demoProfiles, type DemoProfile } from '@/demo/data'
+import MfaChallenge from '@/auth/MfaChallenge'
+import { FirstAdminSetupPage, InviteActivationPage } from '@/auth/RegistrationPages'
+import type { MfaTipo } from '@/hooks/useMFA'
+import { getErrorMessage } from '@/lib/errors'
+import { apiBaseUrl, isDemoMode, requiresInitialAdmin } from '@/lib/env'
+import type { Cargo } from '@/types'
 
-import { useState, useEffect } from 'react'
-import type { CSSProperties } from 'react'
-import { GoogleOAuthProvider, GoogleLogin } from '@react-oauth/google'
-
-import MfaChallenge from './auth/MfaChallenge'
-import MfaSettingsModal from './auth/MfaSettingsModal'
-import type { MfaTipo } from './hooks/useMFA'
-
-// ─── Importe os dashboards existentes ────────────────────────────────────────
-import DashboardRouter from './dashboards/DashboardRouter'
-
-// ─── Configuração ─────────────────────────────────────────────────────────────
-const API_BASE         = 'http://localhost:8000/api'
-// Substitua pelo seu Client ID do Google Cloud Console
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
-
-// ─── Tipos ────────────────────────────────────────────────────────────────────
 
 interface UserProfile {
   id: number
   username: string
   email: string
-  cargo: string
+  cargo: Cargo
   mfa_ativo: boolean
   mfa_tipo: MfaTipo | null
   tem_google: boolean
 }
 
-type AppView = 'login' | 'dashboard'
+interface AuthTokens {
+  access: string
+  refresh: string
+}
 
 interface MfaPending {
   mfa_token: string
   mfa_tipo: MfaTipo
 }
 
-// ─── API helper ───────────────────────────────────────────────────────────────
+interface LoginResponse extends Partial<AuthTokens> {
+  mfa_required?: boolean
+  mfa_token?: string
+  mfa_tipo?: MfaTipo
+}
 
-async function apiFetch(endpoint: string, options: RequestInit = {}) {
+async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
   const token = localStorage.getItem('access_token')
-  const res = await fetch(`${API_BASE}${endpoint}`, {
+  const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${endpoint}`, {
     ...options,
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers as Record<string, string> ?? {}),
+      ...(options.headers ?? {}),
     },
   })
-  if (!res.ok) throw await res.json()
-  return res.json()
+  const data: unknown = await response.json()
+  if (!response.ok) throw data
+  return data as T
 }
 
-// ─── App Principal ────────────────────────────────────────────────────────────
+function saveTokens(tokens: AuthTokens) {
+  localStorage.setItem('access_token', tokens.access)
+  localStorage.setItem('refresh_token', tokens.refresh)
+}
 
-export default function App() {
-  const [view, setView]             = useState<AppView>('login')
-  const [profile, setProfile]       = useState<UserProfile | null>(null)
-  const [isRegister, setIsRegister] = useState(false)
-  const [form, setForm]             = useState({ email: '', password: '', nome: '', regEmail: '' })
-  const [error, setError]           = useState('')
-  const [loading, setLoading]       = useState(false)
+function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile: UserProfile) => void; onEnterDemo: () => void }) {
+  const [form, setForm] = useState({ email: '', password: '' })
+  const [feedback, setFeedback] = useState<{ message: string; tone: 'success' | 'destructive' } | null>(null)
+  const [loading, setLoading] = useState(false)
   const [mfaPending, setMfaPending] = useState<MfaPending | null>(null)
-  const [showMfaSettings, setShowMfaSettings] = useState(false)
 
-  useEffect(() => {
-    if (localStorage.getItem('access_token')) fetchProfile()
-  }, [])
+  const fetchProfile = useCallback(async () => {
+    const profile = await apiFetch<UserProfile>('/profile/')
+    onAuthenticated(profile)
+  }, [onAuthenticated])
 
-  // ── Helpers ─────────────────────────────────────────────────────────────────
-
-  const fetchProfile = async () => {
-    try {
-      const p = await apiFetch('/profile/')
-      setProfile(p)
-      setView('dashboard')
-    } catch {
-      localStorage.removeItem('access_token')
-      localStorage.removeItem('refresh_token')
-    }
-  }
-
-  const salvarTokens = (tokens: { access: string; refresh: string }) => {
-    localStorage.setItem('access_token', tokens.access)
-    localStorage.setItem('refresh_token', tokens.refresh)
-  }
-
-  const handleMfaSuccess = async (tokens: { access: string; refresh: string }) => {
-    salvarTokens(tokens)
+  const completeLogin = async (tokens: AuthTokens) => {
+    saveTokens(tokens)
     setMfaPending(null)
     await fetchProfile()
   }
 
-  const handleLogout = () => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    setProfile(null)
-    setView('login')
-    setForm({ email: '', password: '', nome: '', regEmail: '' })
+  const handleAuthResponse = async (data: LoginResponse) => {
+    if (data.mfa_required && data.mfa_token && data.mfa_tipo) {
+      setMfaPending({ mfa_token: data.mfa_token, mfa_tipo: data.mfa_tipo })
+      return
+    }
+    if (!data.access || !data.refresh) throw new Error('Resposta de autenticação inválida.')
+    await completeLogin({ access: data.access, refresh: data.refresh })
   }
-
-  // ── Login normal ─────────────────────────────────────────────────────────────
 
   const handleLogin = async () => {
-    setError(''); setLoading(true)
+    setFeedback(null)
+    setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/token/`, {
+      const data = await apiFetch<LoginResponse>('/token/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: form.email, password: form.password }),
       })
-      const data = await res.json()
-      if (!res.ok) throw data
-
-      if (data.mfa_required) {
-        // Redireciona para o challenge MFA
-        setMfaPending({ mfa_token: data.mfa_token, mfa_tipo: data.mfa_tipo })
-        return
-      }
-
-      salvarTokens(data)
-      await fetchProfile()
-    } catch (err: any) {
-      setError(err?.detail ?? err?.error ?? 'Credenciais inválidas.')
-    } finally { setLoading(false) }
+      await handleAuthResponse(data)
+    } catch (error) {
+      setFeedback({ message: getErrorMessage(error, 'Credenciais inválidas.'), tone: 'destructive' })
+    } finally {
+      setLoading(false)
+    }
   }
 
-  // ── Registro ─────────────────────────────────────────────────────────────────
-
-  const handleRegister = async () => {
-    setError(''); setLoading(true)
+  const handleGoogleSuccess = async (credential?: string) => {
+    if (!credential) return
+    setFeedback(null)
+    setLoading(true)
     try {
-      const res = await fetch(`${API_BASE}/register/`, {
+      const data = await apiFetch<LoginResponse>('/auth/google/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: form.regEmail, password: form.password,
-          nome: form.nome, cargo: 'DEV',
-        }),
+        body: JSON.stringify({ id_token: credential }),
       })
-      const data = await res.json()
-      if (!res.ok) throw data
-      setIsRegister(false)
-      setError('✅ Conta criada! Faça login.')
-    } catch (err: any) {
-      setError(err?.error ?? err?.detail ?? 'Erro ao registrar.')
-    } finally { setLoading(false) }
+      await handleAuthResponse(data)
+    } catch (error) {
+      setFeedback({ message: getErrorMessage(error, 'Erro ao entrar com Google.'), tone: 'destructive' })
+    } finally {
+      setLoading(false)
+    }
   }
-
-  // ── Google OAuth ─────────────────────────────────────────────────────────────
-
-  const handleGoogleSuccess = async (credentialResponse: { credential?: string }) => {
-    const id_token = credentialResponse.credential
-    if (!id_token) return
-
-    setError(''); setLoading(true)
-    try {
-      const res = await fetch(`${API_BASE}/auth/google/`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_token }),
-      })
-      const data = await res.json()
-      if (!res.ok) throw data
-
-      if (data.mfa_required) {
-        setMfaPending({ mfa_token: data.mfa_token, mfa_tipo: data.mfa_tipo })
-        return
-      }
-
-      salvarTokens(data)
-      await fetchProfile()
-    } catch (err: any) {
-      setError(err?.error ?? err?.detail ?? 'Erro ao entrar com Google.')
-    } finally { setLoading(false) }
-  }
-
-  // ── MFA Challenge ─────────────────────────────────────────────────────────────
 
   if (mfaPending) {
     return (
       <MfaChallenge
         mfaTipo={mfaPending.mfa_tipo}
         mfaToken={mfaPending.mfa_token}
-        onSuccess={handleMfaSuccess}
+        onSuccess={completeLogin}
         onCancel={() => setMfaPending(null)}
       />
     )
   }
 
-  // ── Dashboard ─────────────────────────────────────────────────────────────────
-
-  if (view === 'dashboard' && profile) {
-    return (
-      <>
-        <DashboardRouter cargo={profile.cargo} />
-
-        {/* Botão de settings MFA no sidebar — integre onde preferir */}
-        <div style={{ position: 'fixed', bottom: 72, left: 0, width: 220, padding: '0 1rem' }}>
-          <button
-            onClick={() => setShowMfaSettings(true)}
-            style={{
-              width: '100%', background: 'none',
-              border: '1px solid #E5E7EB', borderRadius: 8,
-              padding: '8px 12px', cursor: 'pointer',
-              fontSize: 13, color: '#374151', fontWeight: 500,
-              display: 'flex', alignItems: 'center', gap: 8,
-            }}
-          >
-            <span>{profile.mfa_ativo ? '🔐' : '🔓'}</span>
-            {profile.mfa_ativo ? 'MFA ativo' : 'Ativar MFA'}
-          </button>
-        </div>
-
-        <section id="center">
-          <button onClick={handleLogout}>Sair</button>
-        </section>
-
-        {showMfaSettings && (
-          <MfaSettingsModal onClose={() => {
-            setShowMfaSettings(false)
-            fetchProfile() // Atualiza status do MFA no profile
-          }} />
-        )}
-      </>
-    )
-  }
-
-  // ── Tela de Login / Registro ──────────────────────────────────────────────────
-
-  const inputStyle: CSSProperties = {
-    padding: '11px 14px', borderRadius: 10, border: '1px solid #D1D5DB',
-    fontSize: 14, color: '#111827', outline: 'none',
-    width: '100%', boxSizing: 'border-box',
-  }
-
   return (
     <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-      <div style={{
-        minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center',
-        background: 'linear-gradient(135deg, #EFF6FF 0%, #F5F3FF 100%)',
-        fontFamily: "'Segoe UI', system-ui, sans-serif", padding: '1rem',
-      }}>
-        <div style={{
-          background: '#fff', borderRadius: 20, border: '1px solid #E5E7EB',
-          padding: '2.5rem', width: '100%', maxWidth: 380,
-          boxShadow: '0 4px 24px rgba(0,0,0,0.06)',
-        }}>
-          {/* Logo */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: '2rem' }}>
-            <div style={{ width: 36, height: 36, background: '#2563EB', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#fff" strokeWidth="2">
-                <rect x="3" y="3" width="7" height="7" rx="1"/>
-                <rect x="14" y="3" width="7" height="7" rx="1"/>
-                <rect x="3" y="14" width="7" height="7" rx="1"/>
-                <rect x="14" y="14" width="7" height="7" rx="1"/>
-              </svg>
-            </div>
-            <span style={{ fontWeight: 700, fontSize: 20, color: '#111827' }}>Lazuli</span>
-          </div>
-
-          <h2 style={{ margin: '0 0 1.5rem', fontSize: 18, fontWeight: 700, color: '#111827' }}>
-            {isRegister ? 'Criar conta' : 'Entrar'}
-          </h2>
-
-          {error && (
-            <div style={{
-              padding: '10px 14px', borderRadius: 8, fontSize: 13, marginBottom: 16,
-              background: error.startsWith('✅') ? '#D1FAE5' : '#FEE2E2',
-              color:      error.startsWith('✅') ? '#065F46'  : '#991B1B',
-            }}>{error}</div>
-          )}
-
-          {/* Formulário */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {isRegister && (
-              <input
-                placeholder="Nome completo"
-                value={form.nome}
-                onChange={e => setForm({ ...form, nome: e.target.value })}
-                style={inputStyle}
-              />
+      <main className="auth-background flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-[580px] shadow-md">
+          <CardHeader className="items-center space-y-6 p-10 pb-5">
+            <BrandMark />
+            <CardTitle className="sr-only">Entrar</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5 p-10 pt-2">
+            {isDemoMode && (
+              <Button type="button" variant="secondary" className="w-full text-primary" onClick={onEnterDemo}>Entrar no modo demonstração</Button>
             )}
-            <input
-              placeholder="Email"
-              type="email"
-              value={isRegister ? form.regEmail : form.email}
-              onChange={e => setForm(isRegister ? { ...form, regEmail: e.target.value } : { ...form, email: e.target.value })}
-              style={inputStyle}
-            />
-            <input
-              placeholder="Senha"
-              type="password"
-              value={form.password}
-              onChange={e => setForm({ ...form, password: e.target.value })}
-              onKeyDown={e => { if (e.key === 'Enter') isRegister ? handleRegister() : handleLogin() }}
-              style={inputStyle}
-            />
-
-            <button
-              onClick={isRegister ? handleRegister : handleLogin}
-              disabled={loading}
-              style={{
-                padding: '12px', background: loading ? '#93C5FD' : '#2563EB',
-                color: '#fff', border: 'none', borderRadius: 10,
-                fontSize: 14, fontWeight: 600, cursor: loading ? 'not-allowed' : 'pointer', marginTop: 4,
+            {feedback && <Alert variant={feedback.tone}>{feedback.message}</Alert>}
+            <form
+              className="space-y-5"
+              onSubmit={(event) => {
+                event.preventDefault()
+                void handleLogin()
               }}
             >
-              {loading ? 'Aguarde...' : isRegister ? 'Criar conta' : 'Entrar'}
-            </button>
+              <div className="space-y-2"><Label htmlFor="login-email">E-mail</Label><Input id="login-email" className="h-12" placeholder="exemplo@email.com" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></div>
+              <div className="space-y-2"><Label htmlFor="login-password">Senha</Label><Input id="login-password" className="h-12" placeholder="••••••••" type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} /></div>
+              <div className="flex items-center justify-between text-sm"><label className="flex items-center gap-2"><Checkbox /> Manter conectado</label><button type="button" className="font-medium text-primary hover:underline">Esqueceu a senha?</button></div>
+              <Button type="submit" className="w-full" disabled={loading}>
+                {loading ? 'Aguarde...' : 'Entrar'}
+              </Button>
+            </form>
 
-            {/* Divisor */}
-            {!isRegister && (
+            {!isDemoMode && (
               <>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, margin: '4px 0' }}>
-                  <div style={{ flex: 1, height: 1, background: '#E5E7EB' }} />
-                  <span style={{ fontSize: 12, color: '#9CA3AF' }}>ou</span>
-                  <div style={{ flex: 1, height: 1, background: '#E5E7EB' }} />
+                <div className="flex items-center gap-2 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">
+                  ou
                 </div>
-
-                {/* Botão Google */}
-                <div style={{ display: 'flex', justifyContent: 'center' }}>
+                <div className="flex justify-center">
                   {GOOGLE_CLIENT_ID ? (
                     <GoogleLogin
-                      onSuccess={handleGoogleSuccess}
-                      onError={() => setError('Falha ao autenticar com Google.')}
+                      onSuccess={(response) => void handleGoogleSuccess(response.credential)}
+                      onError={() => setFeedback({ message: 'Falha ao autenticar com Google.', tone: 'destructive' })}
                       text="signin_with"
                       shape="rectangular"
                       size="large"
-                      width="332"
+                      width="316"
                     />
                   ) : (
-                    <div style={{
-                      padding: '10px 14px', borderRadius: 8, fontSize: 12,
-                      background: '#FEF3C7', color: '#92400E', textAlign: 'center',
-                    }}>
+                    <Alert variant="warning" className="text-center text-xs">
                       Configure VITE_GOOGLE_CLIENT_ID no .env para ativar o login com Google.
-                    </div>
+                    </Alert>
                   )}
                 </div>
               </>
             )}
-          </div>
 
-          <p style={{ textAlign: 'center', marginTop: '1.25rem', fontSize: 13, color: '#6B7280' }}>
-            {isRegister ? 'Já tem conta? ' : 'Não tem conta? '}
-            <span
-              onClick={() => { setIsRegister(!isRegister); setError('') }}
-              style={{ color: '#2563EB', cursor: 'pointer', fontWeight: 500 }}
-            >
-              {isRegister ? 'Fazer login' : 'Cadastre-se'}
-            </span>
-          </p>
-        </div>
-      </div>
+            {isDemoMode && <div className="flex justify-center gap-5 border-t border-border pt-4 text-xs"><a className="text-primary hover:underline" href="/setup-admin">Ver primeiro acesso</a><a className="text-primary hover:underline" href="/activate-invite?token=demo">Ver cadastro por convite</a></div>}
+          </CardContent>
+        </Card>
+      </main>
     </GoogleOAuthProvider>
+  )
+}
+
+export default function App() {
+  const navigate = useNavigate()
+  const savedDemoRole = localStorage.getItem('lazuli_demo_role') as Cargo | null
+  const [profile, setProfile] = useState<UserProfile | null>(isDemoMode && savedDemoRole && demoProfiles[savedDemoRole] ? demoProfiles[savedDemoRole] : null)
+  const [initialAdminCreated, setInitialAdminCreated] = useState(localStorage.getItem('lazuli_initial_admin_created') === 'true')
+  const [checkingSession, setCheckingSession] = useState(!isDemoMode && Boolean(localStorage.getItem('access_token')))
+  const needsInitialAdmin = requiresInitialAdmin && !initialAdminCreated
+
+  const handleAuthenticated = useCallback((nextProfile: UserProfile) => {
+    setProfile(nextProfile)
+    navigate('/app', { replace: true })
+  }, [navigate])
+
+  useEffect(() => {
+    if (isDemoMode) return
+    if (!localStorage.getItem('access_token')) return
+    apiFetch<UserProfile>('/profile/')
+      .then(handleAuthenticated)
+      .catch(() => {
+        localStorage.removeItem('access_token')
+        localStorage.removeItem('refresh_token')
+        navigate('/login', { replace: true })
+      })
+      .finally(() => setCheckingSession(false))
+  }, [handleAuthenticated, navigate])
+
+  const handleLogout = () => {
+    localStorage.removeItem('access_token')
+    localStorage.removeItem('refresh_token')
+    localStorage.removeItem('lazuli_demo_role')
+    setProfile(null)
+    navigate('/login', { replace: true })
+  }
+
+  const enterDemo = () => {
+    const demoProfile = demoProfiles.DEV
+    localStorage.setItem('lazuli_demo_role', demoProfile.cargo)
+    setProfile(demoProfile)
+    navigate('/app/projects', { replace: true })
+  }
+
+  if (checkingSession) {
+    return <div className="auth-background min-h-screen" />
+  }
+
+  return (
+    <Routes>
+      <Route path="/login" element={needsInitialAdmin ? <Navigate to="/setup-admin" replace /> : profile ? <Navigate to={isDemoMode ? '/app/projects' : '/app'} replace /> : <AuthPage onAuthenticated={handleAuthenticated} onEnterDemo={enterDemo} />} />
+      <Route path="/setup-admin" element={<FirstAdminSetupPage onComplete={() => { localStorage.setItem('lazuli_initial_admin_created', 'true'); setInitialAdminCreated(true); navigate('/login', { replace: true }) }} />} />
+      <Route path="/activate-invite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
+      {isDemoMode ? (
+        <Route
+          path="/app/*"
+          element={profile ? (
+            <DemoWorkspace
+              initialProfile={profile as DemoProfile}
+              onProfileChange={setProfile}
+              onExit={handleLogout}
+            />
+          ) : <Navigate to="/login" replace />}
+        />
+      ) : (
+        <Route path="/app/*" element={profile ? <DemoWorkspace initialProfile={profile as DemoProfile} onProfileChange={setProfile} onExit={handleLogout} demoMode={false} /> : <Navigate to="/login" replace />} />
+      )}
+      <Route path="*" element={<Navigate to={needsInitialAdmin ? '/setup-admin' : profile ? (isDemoMode ? '/app/projects' : '/app') : '/login'} replace />} />
+    </Routes>
   )
 }

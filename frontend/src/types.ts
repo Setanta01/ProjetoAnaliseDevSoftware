@@ -14,6 +14,7 @@ export interface Projeto {
   criado_em?: string;
   member_count?: number;
   status?: string;
+  meu_cargo?: ProjectRole;
 }
 
 export interface Sprint {
@@ -42,6 +43,18 @@ export interface Task {
   backlog_id?: number;
   posicao?: number;
   criado_em?: string;
+  codigo?: string;
+  tipo?: CardType;
+  due_date?: string;
+  estimativa_consolidada?: number;
+  criterios_aceitacao?: string;
+  impedido?: boolean;
+  pronto_para_estimativa?: boolean;
+  tem_novidade?: boolean;
+  novos_comentarios?: boolean;
+  aguardando_qa?: boolean;
+  passos_reproducao?: string;
+  resultado_esperado?: string;
 }
 
 export interface Subtask {
@@ -65,6 +78,21 @@ export interface Comentario {
   editado_em?: string;
 }
 
+export interface ChecklistItem {
+  id: number;
+  task_id: number;
+  titulo: string;
+  concluido: boolean;
+}
+
+export interface ProjectMember {
+  id: number;
+  nome: string;
+  email: string;
+  cargo: ProjectRole;
+  avatar?: string;
+}
+
 export interface Usuario {
   id: number;
   nome: string;
@@ -82,6 +110,8 @@ export interface AdminStats {
 }
 
 export type Cargo = "ADMIN" | "GERENTE" | "DEV" | "QA";
+export type ProjectRole = "GERENTE" | "DEV" | "QA";
+export type CardType = "TAREFA" | "BUG";
 export type TaskStatus = "BACKLOG" | "TODO" | "EM_ANDAMENTO" | "REVISAO" | "CONCLUIDO" | "BLOQUEADO";
 export type Prioridade = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
 
@@ -99,27 +129,4 @@ export const PRIORIDADE_LABEL: Record<Prioridade, string> = {
   MEDIA:   "Média",
   ALTA:    "Alta",
   CRITICA: "Urgente",
-};
-
-export const CARGO_COLOR: Record<Cargo, { bg: string; text: string }> = {
-  ADMIN:   { bg: "#EDE9FE", text: "#5B21B6" },
-  GERENTE: { bg: "#DBEAFE", text: "#1D4ED8" },
-  DEV:     { bg: "#D1FAE5", text: "#065F46" },
-  QA:      { bg: "#FEF3C7", text: "#92400E" },
-};
-
-export const STATUS_COLOR: Record<TaskStatus, { bg: string; text: string }> = {
-  BACKLOG:      { bg: "#F3F4F6", text: "#374151" },
-  TODO:         { bg: "#DBEAFE", text: "#1E40AF" },
-  EM_ANDAMENTO: { bg: "#FEF3C7", text: "#92400E" },
-  REVISAO:      { bg: "#EDE9FE", text: "#5B21B6" },
-  CONCLUIDO:    { bg: "#D1FAE5", text: "#065F46" },
-  BLOQUEADO:    { bg: "#FEE2E2", text: "#991B1B" },
-};
-
-export const PRIORIDADE_COLOR: Record<Prioridade, { bg: string; text: string }> = {
-  BAIXA:   { bg: "#D1FAE5", text: "#065F46" },
-  MEDIA:   { bg: "#DBEAFE", text: "#1E40AF" },
-  ALTA:    { bg: "#FEF3C7", text: "#92400E" },
-  CRITICA: { bg: "#FEE2E2", text: "#991B1B" },
 };

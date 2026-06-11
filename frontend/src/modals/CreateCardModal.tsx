@@ -1,92 +1,84 @@
-import React, { useState } from 'react';
-import { X } from 'lucide-react';
-import api from '../api';
+import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
+import api from '@/api'
+import { Alert } from '@/components/ui/alert'
+import { Button } from '@/components/ui/button'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
+import { Textarea } from '@/components/ui/textarea'
+import { getErrorMessage } from '@/lib/errors'
+import type { CardType, Prioridade, ProjectMember } from '@/types'
 
 interface CreateCardModalProps {
-  projetoId: number | null;
-  onClose: () => void;
-  onSuccess: () => void; // Callback para atualizar a lista
+  projetoId: number
+  sprintId?: number
+  onClose: () => void
+  onSuccess: () => void
 }
 
-export default function CreateCardModal({ projetoId, onClose, onSuccess }: CreateCardModalProps) {
-  const [form, setForm] = useState({ titulo: '', descricao: '', prioridade: 'MEDIA' as any });
-  const [loading, setLoading] = useState(false);
+const initialForm = {
+  titulo: '', descricao: '', prioridade: 'BAIXA' as Prioridade, tipo: 'TAREFA' as CardType,
+  responsavelId: '', dueDate: '', estimate: '', criterios: '', passosReproducao: '', resultadoEsperado: '',
+}
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!projetoId) return alert("Selecione um projeto primeiro");
-    if (!form.titulo) return alert("Título obrigatório");
+export default function CreateCardModal({ projetoId, sprintId, onClose, onSuccess }: CreateCardModalProps) {
+  const [form, setForm] = useState(initialForm)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const { data: members = [] } = useQuery({ queryKey: ['project-members', projetoId], queryFn: () => api.get<ProjectMember[]>(`/projetos/${projetoId}/membros/`).then((response) => response.data) })
 
-    setLoading(true);
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault()
+    if (!form.titulo.trim()) return setError('Título obrigatório')
+    setLoading(true)
+    setError('')
+    const responsible = members.find((member) => member.id === Number(form.responsavelId))
     try {
-      // O backend espera: titulo, descricao, prioridade, projeto_id
       await api.post('/tasks/', {
-        titulo: form.titulo,
-        descricao: form.descricao,
-        prioridade: form.prioridade,
-        projeto_id: projetoId,
-        // O status padrão no backend é BACKLOG
-      });
-      onSuccess();
-      onClose();
-    } catch (error) {
-      alert("Erro ao criar task");
+        titulo: form.titulo.trim(), descricao: form.descricao, prioridade: form.prioridade, tipo: form.tipo,
+        projeto_id: projetoId, sprint_id: sprintId, responsavel_id: responsible?.id, responsavel_nome: responsible?.nome,
+        due_date: form.dueDate || undefined, estimativa_consolidada: form.estimate ? Number(form.estimate) : undefined,
+        criterios_aceitacao: form.criterios, passos_reproducao: form.passosReproducao, resultado_esperado: form.resultadoEsperado,
+      })
+      onSuccess()
+      onClose()
+    } catch (caughtError) {
+      setError(getErrorMessage(caughtError, 'Erro ao criar task'))
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-xl w-full max-w-lg flex flex-col">
-        <div className="flex items-center justify-between p-6 border-b border-gray-100">
-          <h2 className="text-xl font-bold text-slate-800">Criar Nova Task</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={20} /></button>
-        </div>
-        
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Título *</label>
-            <input 
-              type="text" 
-              className="w-full p-2.5 border border-gray-300 rounded-md text-sm focus:ring-blue-500 outline-none" 
-              value={form.titulo}
-              onChange={e => setForm({ ...form, titulo: e.target.value })}
-              placeholder="Título da task"
-            />
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden p-0">
+        <DialogHeader className="border-b border-border px-8 py-6"><DialogTitle>Criar Novo Card</DialogTitle><DialogDescription className="sr-only">Preencha os dados do novo card.</DialogDescription></DialogHeader>
+        <form className="flex min-h-0 flex-col" onSubmit={(event) => void handleSubmit(event)}>
+          <div className="space-y-5 overflow-y-auto px-8 py-6">
+            {error && <Alert variant="destructive">{error}</Alert>}
+            <Field label="Título *"><Input value={form.titulo} onChange={(event) => setForm({ ...form, titulo: event.target.value })} placeholder="Ex: Implementar tela de login" autoFocus /></Field>
+            <Field label="Descrição"><Textarea className="min-h-28" value={form.descricao} onChange={(event) => setForm({ ...form, descricao: event.target.value })} placeholder="Detalhes sobre a atividade..." /></Field>
+            <div className="grid gap-5 sm:grid-cols-2">
+              <Field label="Prioridade"><Select value={form.prioridade} onChange={(event) => setForm({ ...form, prioridade: event.target.value as Prioridade })}><option value="BAIXA">Baixa</option><option value="MEDIA">Média</option><option value="ALTA">Alta</option><option value="CRITICA">Crítica</option></Select></Field>
+              <Field label="Tipo"><Select value={form.tipo} onChange={(event) => setForm({ ...form, tipo: event.target.value as CardType })}><option value="TAREFA">Task</option><option value="BUG">Bug</option></Select></Field>
+            </div>
+            <div className="grid gap-5 sm:grid-cols-3">
+              <Field label="Responsável"><Select value={form.responsavelId} onChange={(event) => setForm({ ...form, responsavelId: event.target.value })}><option value="">Não atribuído</option>{members.map((member) => <option key={member.id} value={member.id}>{member.nome}</option>)}</Select></Field>
+              <Field label="Prazo"><Input type="date" value={form.dueDate} onChange={(event) => setForm({ ...form, dueDate: event.target.value })} /></Field>
+              <Field label="Estimativa"><Select value={form.estimate} onChange={(event) => setForm({ ...form, estimate: event.target.value })}><option value="">Não estimada</option>{[1, 2, 3, 5, 8, 13, 21].map((value) => <option key={value} value={value}>{value} pontos</option>)}</Select></Field>
+            </div>
+            <Field label="Critérios de Aceitação"><Textarea className="min-h-24 font-mono" value={form.criterios} onChange={(event) => setForm({ ...form, criterios: event.target.value })} placeholder={'- Botão de login na tela principal\n- Redirecionamento correto...'} /></Field>
+            {form.tipo === 'BUG' && <div className="grid gap-5 sm:grid-cols-2"><Field label="Passos para reprodução"><Textarea value={form.passosReproducao} onChange={(event) => setForm({ ...form, passosReproducao: event.target.value })} /></Field><Field label="Resultado esperado"><Textarea value={form.resultadoEsperado} onChange={(event) => setForm({ ...form, resultadoEsperado: event.target.value })} /></Field></div>}
           </div>
-          
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Descrição</label>
-            <textarea 
-              className="w-full p-2.5 border border-gray-300 rounded-md h-24 resize-none text-sm focus:ring-blue-500 outline-none" 
-              value={form.descricao}
-              onChange={e => setForm({ ...form, descricao: e.target.value })}
-            />
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Prioridade</label>
-            <select 
-              className="w-full p-2.5 border border-gray-300 rounded-md bg-white text-sm outline-none"
-              value={form.prioridade}
-              onChange={e => setForm({ ...form, prioridade: e.target.value })}
-            >
-              <option value="BAIXA">Baixa</option>
-              <option value="MEDIA">Média</option>
-              <option value="ALTA">Alta</option>
-              <option value="CRITICA">Crítica</option>
-            </select>
-          </div>
-
-          <div className="pt-4 flex justify-end space-x-3">
-            <button type="button" onClick={onClose} className="px-4 py-2 border text-gray-700 rounded-md hover:bg-gray-50">Cancelar</button>
-            <button type="submit" disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50">
-              {loading ? 'Criando...' : 'Criar Task'}
-            </button>
-          </div>
+          <DialogFooter className="border-t border-border bg-muted px-8 py-5"><Button type="button" variant="outline" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={loading}>{loading ? 'Criando...' : 'Criar Card'}</Button></DialogFooter>
         </form>
-      </div>
-    </div>
-  );
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return <div className="space-y-2"><Label>{label}</Label>{children}</div>
 }
