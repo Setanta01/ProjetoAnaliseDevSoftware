@@ -215,6 +215,36 @@ def auth_logout(request):
     return Response({'detail': 'Logout realizado.'})
 
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def auth_convite_info(request):
+    """
+    GET /auth/convite-info/?token=... 
+    Retorna o email e status do convite para pré-preencher o formulário.
+    """
+    token = request.query_params.get('token', '').strip()
+    
+    if not token:
+        return Response({'detail': 'Token é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        convite = ConviteSistema.objects.get(token=token)
+    except ConviteSistema.DoesNotExist:
+        return Response({'detail': 'Convite inválido.'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Verifica validade (opcional, mas bom para feedback visual)
+    if convite.usado:
+        return Response({'detail': 'Este convite já foi utilizado.'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if convite.expira_em and convite.expira_em < timezone.now():
+        return Response({'detail': 'Este convite expirou.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    # Retorna os dados que o frontend precisa
+    return Response({
+        'email': convite.email,
+        'admin': convite.admin,
+    })
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def auth_ativar_convite(request):

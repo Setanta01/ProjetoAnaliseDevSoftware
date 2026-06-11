@@ -42,6 +42,7 @@ urlpatterns = [
     # POST  /auth/ativar-convite/  → ativa conta via token de convite
     #   ✗  criar view auth_ativar_convite
     path('auth/ativar-convite/',            views.auth_ativar_convite,      name='auth_ativar_convite'),
+    path('auth/convite-info/', views.auth_convite_info, name='auth_convite_info'),
 
     # POST  /auth/recuperar-senha/ → dispara e-mail com link de recuperação
     #   ✗  criar view auth_recuperar_senha
