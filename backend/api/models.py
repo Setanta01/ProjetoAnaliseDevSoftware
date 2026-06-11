@@ -21,7 +21,6 @@ class Usuario(models.Model):
     id            = models.AutoField(primary_key=True)
     nome          = models.CharField(max_length=120)
     email         = models.CharField(max_length=150, unique=True)
-    # SQL: senha_hash VARCHAR(255) nullable (NULL p/ usuários Google)
     senha_hash    = models.CharField(max_length=255, blank=True, null=True,
                                      db_column='senha_hash')
     admin         = models.BooleanField(default=False)
@@ -58,7 +57,8 @@ class Usuario(models.Model):
 
     @property
     def is_authenticated(self):
-        return True
+        # FIX (#7): um usuário inativo não deve ser considerado autenticado.
+        return self.ativo
 
     @property
     def is_anonymous(self):
@@ -132,12 +132,7 @@ class Usuario(models.Model):
 # =============================================================================
 
 class ConviteSistema(models.Model):
-    """
-    Tabela: convites_sistema
-
-    - admin: se True o usuário ativado recebe flag admin=True
-    - Sem cargo_id global: cargo é atribuído ao adicionar o membro ao projeto
-    """
+    """Tabela: convites_sistema"""
 
     id         = models.AutoField(primary_key=True)
     email      = models.CharField(max_length=150)
@@ -165,11 +160,7 @@ class ConviteSistema(models.Model):
 # =============================================================================
 
 class Sessao(models.Model):
-    """
-    Tabela: sessoes
-
-    Armazena JTI dos refresh tokens para suportar blacklist/logout.
-    """
+    """Tabela: sessoes"""
 
     id        = models.AutoField(primary_key=True)
     usuario   = models.ForeignKey(
@@ -247,12 +238,7 @@ class Projeto(models.Model):
 # =============================================================================
 
 class ProjetoMembro(models.Model):
-    """
-    Tabela: projeto_membros
-
-    O cargo (GERENTE / DEV / QA) existe SOMENTE aqui,
-    vinculado ao par (projeto, usuário).
-    """
+    """Tabela: projeto_membros"""
 
     CARGO_CHOICES = [
         ('GERENTE', 'Gerente'),
@@ -331,7 +317,14 @@ class ColunasBoard(models.Model):
 # =============================================================================
 
 class PermissaoColuna(models.Model):
-    """Tabela: permissoes_coluna"""
+    """
+    Tabela: permissoes_coluna
+
+    Define quais cargos de projeto podem mover cards PARA esta coluna.
+    Mantido mapeado para que a tabela do schema continue acessível via ORM,
+    permitindo futura migração das regras de transição (hoje baseadas no nome
+    da coluna em card_detail) para uma checagem configurável por projeto.
+    """
 
     CARGO_CHOICES = [
         ('GERENTE', 'Gerente'),
@@ -412,7 +405,8 @@ class Card(models.Model):
 
     - sprint=None → card está no backlog
     - passos_reproducao / resultado_esperado → exclusivos de BUG
-    - card_origem_id: requer ALTER TABLE (ver comentário abaixo)
+    - card_origem (db_column='card_origem_id'): card que originou um BUG.
+      A coluna existe no schema (adicionada via ALTER TABLE — ver schema.sql).
     - Sem campo 'status' no banco: status é inferido pela coluna (e_final=TRUE → concluído).
       NÃO use setattr(card, 'status', ...) — é uma property derivada, não persiste.
     """
@@ -474,8 +468,8 @@ class Card(models.Model):
     # Campos de BUG
     passos_reproducao  = models.TextField(blank=True, null=True)
     resultado_esperado = models.TextField(blank=True, null=True)
-    # FK para card de origem do bug — requer coluna no schema:
-    # ALTER TABLE cards ADD COLUMN card_origem_id INT REFERENCES cards(id);
+    # FIX (#1): coluna card_origem_id ADICIONADA ao schema.sql (ver ALTER TABLE).
+    # FK auto-referente: card (tarefa) que originou este BUG.
     card_origem = models.ForeignKey(
         'self', on_delete=models.SET_NULL,
         null=True, blank=True,
@@ -496,12 +490,8 @@ class Card(models.Model):
     @property
     def status(self):
         """
-        Derivado da coluna: se a coluna for a final (e_final=True) → CONCLUIDO,
-        caso contrário → ABERTO.
-
-        ATENÇÃO: esta é uma property somente-leitura. Nunca use setattr(card, 'status', ...)
-        pois o valor não existe como coluna no banco e não será persistido.
-        Use card.coluna para alterar o status de um card.
+        Derivado da coluna: e_final=True → CONCLUIDO; caso contrário → ABERTO.
+        Property somente-leitura — não persiste. Use card.coluna para alterar.
         """
         try:
             return 'CONCLUIDO' if self.coluna.e_final else 'ABERTO'
@@ -561,15 +551,7 @@ class CardVinculo(models.Model):
 # =============================================================================
 
 class CardHistorico(models.Model):
-    """
-    Tabela: card_historico
-
-    Schema SQL: id, card_id, usuario_id, coluna_anterior_id, coluna_nova_id,
-                responsavel_anterior, responsavel_novo, acao TEXT NOT NULL, alterado_em.
-
-    NÃO passe 'tipo' ou 'detalhe' para objects.create() — use o helper
-    _registrar_historico() em views.py que monta o campo 'acao' corretamente.
-    """
+    """Tabela: card_historico — use _registrar_historico() em views.py."""
 
     id                   = models.AutoField(primary_key=True)
     card                 = models.ForeignKey(
@@ -613,11 +595,6 @@ class CardHistorico(models.Model):
         db_table = 'card_historico'
         managed  = False
         ordering = ['alterado_em']
-
-    # FIX: __init__ removido. Ele interceptava kwargs 'tipo'/'detalhe' e tentava
-    # convertê-los em 'acao', mas objects.create() não passa pelo __init__ do model
-    # da mesma forma que uma instanciação direta — os kwargs extras causavam TypeError.
-    # A montagem do campo 'acao' agora é feita em _registrar_historico() em views.py.
 
     def __str__(self):
         return f'Historico card={self.card_id} | {self.acao[:60]}'
@@ -799,12 +776,7 @@ class ValidacaoQA(models.Model):
 # =============================================================================
 
 class Comentario(models.Model):
-    """
-    Tabela: comentarios
-
-    SQL: card_id, usuario_id, texto, fixado, editado_em, criado_em.
-    O FK 'autor' usa db_column='usuario_id' para corresponder ao schema.
-    """
+    """Tabela: comentarios — FK 'autor' usa db_column='usuario_id'."""
 
     id         = models.AutoField(primary_key=True)
     card       = models.ForeignKey(
@@ -837,15 +809,8 @@ class Comentario(models.Model):
 
 class Anexo(models.Model):
     """
-    Tabela: anexos
-
-    SQL: card_id NOT NULL, comentario_id nullable, usuario_id, nome_arquivo,
-         url TEXT NOT NULL, mime_type nullable, criado_em.
-
-    ATENÇÃO: 'url' no banco é TEXT simples (não FileField gerenciado pelo Django).
-    Use TextField com db_column='url'. NÃO chame arquivo.delete() — a URL pode
-    apontar para storage externo (S3, etc.) e não é gerenciada pelo Django storage.
-    A deleção física do arquivo, quando necessária, deve ser feita via storage SDK.
+    Tabela: anexos — 'url' é TextField (não FileField).
+    NÃO chamar arquivo.delete(); deleção física via SDK do storage externo.
     """
 
     id           = models.AutoField(primary_key=True)
@@ -866,10 +831,6 @@ class Anexo(models.Model):
         related_name='anexos_enviados',
     )
     nome_arquivo = models.CharField(max_length=255)
-    # FIX: era FileField(upload_to='anexos/', db_column='url'), mas o schema define
-    # 'url' como TEXT simples. FileField gera caminhos relativos incompatíveis com
-    # URLs absolutas de storage externo e o .delete() chamaria o storage do Django
-    # em vez de deletar corretamente. Usar TextField diretamente.
     url          = models.TextField(db_column='url')
     mime_type    = models.CharField(max_length=100, blank=True, null=True)
     criado_em    = models.DateTimeField(auto_now_add=True)
@@ -887,14 +848,7 @@ class Anexo(models.Model):
 # =============================================================================
 
 class NotificacaoUsuario(models.Model):
-    """
-    Tabela: notificacoes
-
-    SQL: id, usuario_id, tipo (enum), mensagem, lida, card_id nullable,
-         sprint_id nullable, criado_em.
-
-    ATENÇÃO: a coluna no banco chama-se 'lida' — usar db_column='lida'.
-    """
+    """Tabela: notificacoes — coluna 'lida' via db_column='lida'."""
 
     TIPO_CHOICES = [
         ('ATRIBUICAO', 'Atribuição'),
@@ -914,7 +868,6 @@ class NotificacaoUsuario(models.Model):
     )
     tipo      = models.CharField(max_length=20, choices=TIPO_CHOICES, default='COMENTARIO')
     mensagem  = models.TextField(default='')
-    # FIX: coluna no banco chama-se 'lida', não 'lido'
     lida      = models.BooleanField(default=False, db_column='lida')
     card      = models.ForeignKey(
         Card, on_delete=models.CASCADE,

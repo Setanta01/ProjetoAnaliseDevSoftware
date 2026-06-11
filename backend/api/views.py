@@ -1,27 +1,27 @@
 # backend/api/views.py
 
 import secrets
-from datetime import timedelta
+from datetime import timedelta, datetime
 
 from django.contrib.auth import authenticate
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import IntegrityError
-from django.db.models import Prefetch, Q
+from django.db.models import Prefetch, Q, Count
 from django.utils import timezone
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken, AccessToken
+from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.exceptions import TokenError
 
 from .models import (
     Usuario,
+    Sessao,
     ConviteSistema,
     RecuperacaoSenha,
-    Sessao,
     Projeto,
     ProjetoMembro,
     ColunasBoard,
@@ -36,8 +36,11 @@ from .models import (
     Comentario,
     Anexo,
     NotificacaoUsuario,
+    JustificativaPrazo,   # FIX (#2): import no topo (eliminou import local).
 )
-from .mfa_utils import gerar_mfa_token, enviar_otp_email
+# FIX (#9): helpers de emissão de token centralizados em mfa_utils — importados
+# aqui e em views_mfa sem risco de import circular.
+from .mfa_utils import enviar_otp_email, _emitir_tokens, _resposta_mfa_pendente
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -55,19 +58,6 @@ COLUNAS_PADRAO = [
 COLUNA_VALIDACAO_NOME = 'Validação/QA'
 
 
-def _emitir_tokens(user):
-    refresh = RefreshToken.for_user(user)
-    return {'access': str(refresh.access_token), 'refresh': str(refresh)}
-
-
-def _resposta_mfa_pendente(user):
-    mfa_token = gerar_mfa_token(user.id)
-    return Response(
-        {'mfa_required': True, 'mfa_tipo': user.mfa_tipo, 'mfa_token': mfa_token},
-        status=status.HTTP_200_OK,
-    )
-
-
 def _cargo_no_projeto(user, projeto):
     """Retorna o cargo do usuário no projeto ('GERENTE'|'DEV'|'QA') ou None."""
     try:
@@ -83,17 +73,14 @@ def _eh_membro(user, projeto):
 def _get_projeto_ou_403(user, projeto_id):
     """
     Retorna (projeto, cargo, erro_response).
-
-    Para admins sem membership, cargo=None mas o acesso é permitido.
-    Views que precisam distinguir admin de GERENTE devem checar user.admin
-    separadamente — não assumir que cargo=None implica sem permissão.
+    Admin sem membership: cargo=None mas acesso permitido (checar user.admin).
     """
     try:
         projeto = Projeto.objects.get(pk=projeto_id, arquivado=False)
     except Projeto.DoesNotExist:
         return None, None, Response({'detail': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
     if user.admin:
-        cargo = _cargo_no_projeto(user, projeto)  # pode ser None; admin passa mesmo assim
+        cargo = _cargo_no_projeto(user, projeto)
         return projeto, cargo, None
     cargo = _cargo_no_projeto(user, projeto)
     if cargo is None:
@@ -102,13 +89,7 @@ def _get_projeto_ou_403(user, projeto_id):
 
 
 def _registrar_historico(card, usuario, tipo, detalhe=''):
-    """
-    Cria um registro de histórico para o card.
-
-    FIX: CardHistorico não tem campos 'tipo' e 'detalhe' no banco — só 'acao'.
-    A montagem da string é feita aqui, antes do objects.create(), para evitar
-    que kwargs inválidos cheguem ao ORM e causem TypeError.
-    """
+    """CardHistorico só tem 'acao' no banco — montamos a string aqui."""
     acao = f'{tipo}: {detalhe}' if detalhe else tipo
     CardHistorico.objects.create(card=card, usuario=usuario, acao=acao)
 
@@ -123,17 +104,11 @@ def _enviar_email(destinatario, assunto, corpo):
             fail_silently=False,
         )
     except Exception:
-        pass  # log em produção; não quebra a request
+        pass
 
 
 def _serializar_card(card, tem_novidade=False):
-    """
-    Serializa um card para dict.
-
-    FIX: 'status' é uma property derivada de card.coluna.e_final. Para evitar
-    uma query extra por card, garanta que select_related('coluna') foi feito
-    no queryset antes de chamar este helper.
-    """
+    """Serializa um card. Garanta select_related('coluna') antes de chamar."""
     return {
         'id': card.id,
         'titulo': card.titulo,
@@ -164,7 +139,6 @@ def _serializar_comentario(c):
         'criado_em': c.criado_em,
         'editado_em': c.editado_em,
         'anexos': [
-            # FIX: Anexo.url é TextField (não FileField). Acessar .url diretamente.
             {'id': a.id, 'nome': a.nome_arquivo, 'url': a.url}
             for a in c.anexos.all()
         ],
@@ -203,7 +177,6 @@ def auth_login(request):
     return Response(_emitir_tokens(user))
 
 
-# Alias mantido para a rota /token/ (compatibilidade SimpleJWT)
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def custom_token_obtain(request):
@@ -213,14 +186,32 @@ def custom_token_obtain(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def auth_logout(request):
-    """POST /auth/logout/ — invalida o refresh token atual."""
+    """POST /auth/logout/ — invalida o refresh token atual usando a tabela sessoes."""
     refresh_token = request.data.get('refresh')
     if refresh_token:
         try:
             token = RefreshToken(refresh_token)
-            token.blacklist()
+            
+            # Extrai o JTI (ID único do token) e a data de expiração
+            jti = token['jti']
+            exp_timestamp = token['exp']
+            exp_dt = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+
+            # Cria o registro na tabela 'sessoes' marcando como revogado
+            # Isso substitui a necessidade do app 'simplejwt.token_blacklist'
+            Sessao.objects.update_or_create(
+                token_jti=jti,
+                defaults={
+                    'usuario_id': request.user.id,
+                    'revogado': True,
+                    'expira_em': exp_dt
+                }
+            )
         except TokenError:
-            pass  # token já expirado/inválido — tudo bem
+            pass # Token inválido, não há nada a fazer
+        except Exception:
+            pass # Ignora outros erros para não travar o logout no cliente
+            
     return Response({'detail': 'Logout realizado.'})
 
 
@@ -245,16 +236,26 @@ def auth_ativar_convite(request):
     if convite.expira_em and convite.expira_em < timezone.now():
         return Response({'detail': 'Convite expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Cria ou ativa o usuário
-    user, created = Usuario.objects.get_or_create(
-        email=convite.email,
-        defaults={'nome': convite.email.split('@')[0], 'ativo': False, 'admin': convite.admin},
-    )
+    # FIX (#8): impede account takeover. Não sobrescreve senha de conta já ativa.
+    try:
+        existente = Usuario.objects.get(email=convite.email)
+        if existente.ativo:
+            return Response(
+                {'detail': 'Já existe uma conta ativa para este e-mail. Use a recuperação de senha.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        user = existente  # conta inativa → ativar
+    except Usuario.DoesNotExist:
+        user = Usuario.objects.create(
+            email=convite.email,
+            nome=convite.email.split('@')[0],
+            ativo=False,
+            admin=convite.admin,
+        )
+
     user.admin = convite.admin
     user.ativo = True
     user.set_password(senha)
-    # FIX: salvar apenas os campos alterados explicitamente para evitar sobrescrever
-    # campos que possam ter sido modificados por outro processo concorrente.
     user.save(update_fields=['admin', 'ativo', 'senha_hash'])
 
     convite.usado = True
@@ -271,7 +272,6 @@ def auth_recuperar_senha(request):
     if not email:
         return Response({'detail': 'E-mail é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Sempre retorna 200 para não vazar se o e-mail existe
     try:
         user = Usuario.objects.get(email=email, ativo=True)
         token = secrets.token_urlsafe(40)
@@ -308,8 +308,6 @@ def auth_redefinir_senha(request):
         return Response({'detail': 'Token expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
     rec.usuario.set_password(nova_senha)
-    # FIX: update_fields lista o atributo Python ('senha_hash'), não o db_column.
-    # Inclui apenas o campo modificado para evitar side-effects.
     rec.usuario.save(update_fields=['senha_hash'])
     rec.usado = True
     rec.save(update_fields=['usado'])
@@ -335,11 +333,13 @@ def auth_profile(request):
             'criado_em':  user.criado_em,
         })
 
-    # PUT — atualiza campos básicos
+    # PUT — FIX (#10): só persiste se 'nome' veio no payload.
     if 'nome' in request.data:
         user.nome = request.data['nome']
-    user.save(update_fields=['nome'])
-    return Response({'detail': 'Perfil atualizado.'})
+        user.save(update_fields=['nome'])
+        return Response({'detail': 'Perfil atualizado.'})
+
+    return Response({'detail': 'Nenhuma alteração enviada.'})
 
 
 @api_view(['POST'])
@@ -389,11 +389,6 @@ def admin_convites(request):
     if not email:
         return Response({'detail': 'E-mail é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # FIX: o check de convite pendente tinha race condition. Agora tentamos criar
-    # diretamente e capturamos IntegrityError. Porém como não há unique constraint
-    # no banco para (email, usado=False), mantemos o check + tratamento de erro
-    # para dar mensagem clara ao usuário, aceitando que em caso extremo de
-    # concorrência um segundo convite pode ser criado (improvável em uso real).
     if ConviteSistema.objects.filter(email=email, usado=False).exists():
         return Response({'detail': 'Já existe um convite pendente para este e-mail.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -407,7 +402,6 @@ def admin_convites(request):
             expira_em=timezone.now() + timedelta(hours=24),
         )
     except IntegrityError:
-        # token collision extremamente improvável mas tratado por segurança
         return Response({'detail': 'Erro ao gerar convite. Tente novamente.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     link = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/ativar-convite?token={token}"
@@ -497,7 +491,12 @@ def admin_projetos(request):
         return err
 
     if request.method == 'GET':
-        projetos = Projeto.objects.all().order_by('-criado_em')
+        # FIX (#4): annotate(Count) substitui o .count() por projeto (N+1).
+        projetos = (
+            Projeto.objects.all()
+            .annotate(num_membros=Count('projeto_membros'))
+            .order_by('-criado_em')
+        )
         data = [
             {
                 'id':         p.id,
@@ -505,13 +504,12 @@ def admin_projetos(request):
                 'descricao':  p.descricao,
                 'arquivado':  p.arquivado,
                 'criado_em':  p.criado_em,
-                'membros':    p.projeto_membros.count(),
+                'membros':    p.num_membros,
             }
-            for p in projetos.prefetch_related('projeto_membros')
+            for p in projetos
         ]
         return Response(data)
 
-    # POST — cria projeto com colunas Kanban padrão
     nome      = request.data.get('nome', '').strip()
     descricao = request.data.get('descricao', '')
     if not nome:
@@ -564,7 +562,7 @@ def admin_projeto_detail(request, projeto_id):
 def projetos_list(request):
     """GET /projetos/ — projetos do usuário logado via projeto_membros."""
     memberships = ProjetoMembro.objects.filter(
-        usuario=request.user
+        usuario=request.user, projeto__arquivado=False
     ).select_related('projeto').order_by('-projeto__criado_em')
 
     data = [
@@ -576,7 +574,6 @@ def projetos_list(request):
             'criado_em': m.projeto.criado_em,
         }
         for m in memberships
-        if not m.projeto.arquivado
     ]
     return Response(data)
 
@@ -606,7 +603,6 @@ def projeto_detail(request, projeto_id):
             'sprints_ativas': list(sprints_ativas),
         })
 
-    # PUT / PATCH — exige ADMIN ou GERENTE
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes ou Admins podem editar o projeto.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -649,7 +645,6 @@ def projeto_membros(request, projeto_id):
             for m in membros
         ])
 
-    # POST — exige ADMIN ou GERENTE
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes ou Admins podem adicionar membros.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -658,7 +653,7 @@ def projeto_membros(request, projeto_id):
 
     if not usuario_id or novo_cargo not in CARGOS_VALIDOS:
         return Response(
-            {'detail': f'usuario_id e cargo (GERENTE|DEV|QA) são obrigatórios.'},
+            {'detail': 'usuario_id e cargo (GERENTE|DEV|QA) são obrigatórios.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
 
@@ -688,8 +683,6 @@ def projeto_membro_detail(request, projeto_id, usuario_id):
     if err:
         return err
 
-    # FIX: admin sem membership retorna cargo=None em _get_projeto_ou_403, mas
-    # deve ser tratado como autorizado. A checagem usa user.admin explicitamente.
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes ou Admins podem alterar membros.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -760,8 +753,6 @@ def projeto_backlog(request, projeto_id):
 
     cards = (
         Card.objects.filter(projeto=projeto, sprint__isnull=True)
-        # FIX: 'coluna' adicionado ao select_related para evitar query extra
-        # ao acessar card.status (property que lê coluna.e_final).
         .select_related('responsavel', 'coluna')
         .order_by('prioridade', 'criado_em')
     )
@@ -781,11 +772,19 @@ def projeto_sprints(request, projeto_id):
         return err
 
     if request.method == 'GET':
-        sprints = Sprint.objects.filter(projeto=projeto).order_by('criado_em')
+        # FIX (#5): total e concluídos agregados em uma única query.
+        sprints = (
+            Sprint.objects.filter(projeto=projeto)
+            .annotate(
+                total_cards=Count('cards'),
+                concluidos=Count('cards', filter=Q(cards__coluna__e_final=True)),
+            )
+            .order_by('criado_em')
+        )
         data = []
         for s in sprints:
-            total = Card.objects.filter(sprint=s).count()
-            concl = Card.objects.filter(sprint=s, coluna__e_final=True).count()
+            total = s.total_cards
+            concl = s.concluidos
             data.append({
                 'id':           s.id,
                 'nome':         s.nome,
@@ -798,7 +797,6 @@ def projeto_sprints(request, projeto_id):
             })
         return Response(data)
 
-    # POST — apenas GERENTE
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes podem criar sprints.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -864,25 +862,26 @@ def sprint_detail(request, sprint_id):
     if err:
         return err
 
-    # FIX: prefetch de notificações com filtro de usuário para evitar N queries extras.
-    # Sem o Prefetch com queryset filtrado, chamar card.notificacoes.filter(...)
-    # após um prefetch genérico emite uma nova query SQL por card.
     notifs_prefetch = Prefetch(
         'notificacoes',
         queryset=NotificacaoUsuario.objects.filter(usuario=request.user, lida=False),
         to_attr='notificacoes_nao_lidas',
     )
 
+    # FIX (#3): prefetch de comentarios + autor + anexos; ordenação em Python.
     cards = (
         Card.objects.filter(sprint=sprint)
-        # FIX: 'coluna' adicionado para evitar query extra ao acessar card.status
         .select_related('responsavel', 'coluna')
-        .prefetch_related('checklists__itens', 'comentarios__autor', notifs_prefetch)
+        .prefetch_related(
+            'checklists__itens',
+            'comentarios__autor',
+            'comentarios__anexos',
+            notifs_prefetch,
+        )
     )
 
     cards_data = []
     for card in cards:
-        # FIX: usa o atributo to_attr do Prefetch — sem query extra por card
         tem_novidade = bool(card.notificacoes_nao_lidas)
 
         checklists_data = []
@@ -902,7 +901,9 @@ def sprint_detail(request, sprint_id):
                 ],
             })
 
-        comentarios_data = [_serializar_comentario(c) for c in card.comentarios.order_by('criado_em')]
+        # FIX (#3): ordena a lista prefetchada em memória, sem nova query.
+        comentarios_ordenados = sorted(card.comentarios.all(), key=lambda c: c.criado_em)
+        comentarios_data = [_serializar_comentario(c) for c in comentarios_ordenados]
 
         card_dict = _serializar_card(card, tem_novidade=tem_novidade)
         card_dict['coluna_nome']   = card.coluna.nome if card.coluna else None
@@ -954,9 +955,10 @@ def sprint_encerrar(request, sprint_id):
         except Sprint.DoesNotExist:
             return Response({'detail': 'Próxima sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
-    sprint.status   = 'ENCERRADA'
-    sprint.data_fim = timezone.now().date()
-    sprint.save(update_fields=['status', 'data_fim'])
+    sprint.status       = 'ENCERRADA'
+    sprint.data_fim     = timezone.now().date()
+    sprint.encerrada_em = timezone.now()
+    sprint.save(update_fields=['status', 'data_fim', 'encerrada_em'])
 
     return Response({'id': sprint.id, 'status': sprint.status, 'data_fim': sprint.data_fim})
 
@@ -994,6 +996,8 @@ def projeto_cards(request, projeto_id):
         ColunasBoard.objects.filter(projeto=projeto, e_inicial=True).first()
         or ColunasBoard.objects.filter(projeto=projeto).order_by('posicao').first()
     )
+    if coluna is None:
+        return Response({'detail': 'Projeto não possui colunas configuradas.'}, status=status.HTTP_400_BAD_REQUEST)
 
     card_kwargs = dict(
         projeto=projeto,
@@ -1023,11 +1027,11 @@ def projeto_cards(request, projeto_id):
     if tipo == 'BUG':
         card_kwargs['passos_reproducao']  = request.data.get('passos_reproducao', '')
         card_kwargs['resultado_esperado'] = request.data.get('resultado_esperado', '')
+        # FIX (#1): coluna card_origem_id existe no schema → uso da FK card_origem.
         card_origem_id = request.data.get('card_origem_id')
         if card_origem_id:
             try:
-                origem = Card.objects.get(pk=card_origem_id, projeto=projeto)
-                card_kwargs['card_origem'] = origem
+                card_kwargs['card_origem'] = Card.objects.get(pk=card_origem_id, projeto=projeto)
             except Card.DoesNotExist:
                 pass
 
@@ -1052,8 +1056,6 @@ def cards_list(request):
     if request.query_params.get('responsavel') == 'me':
         cards = cards.filter(responsavel=user)
 
-    # FIX: 'coluna' adicionado ao select_related para evitar query extra ao
-    # acessar card.status (property que lê coluna.e_final) dentro de _serializar_card.
     cards = cards.select_related('responsavel', 'coluna').order_by('-criado_em')
     return Response([_serializar_card(c) for c in cards])
 
@@ -1063,8 +1065,9 @@ def cards_list(request):
 def card_detail(request, card_id):
     """GET|PATCH|DELETE /cards/<id>/"""
     try:
+        # FIX (#6): 'sprint' adicionado ao select_related (usado na regra de prazo).
         card = Card.objects.select_related(
-            'projeto', 'responsavel', 'coluna', 'criado_por'
+            'projeto', 'responsavel', 'coluna', 'criado_por', 'sprint'
         ).get(pk=card_id)
     except Card.DoesNotExist:
         return Response({'detail': 'Card não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
@@ -1077,7 +1080,7 @@ def card_detail(request, card_id):
         data = _serializar_card(card)
         data['passos_reproducao']  = getattr(card, 'passos_reproducao', None)
         data['resultado_esperado'] = getattr(card, 'resultado_esperado', None)
-        data['card_origem_id']     = getattr(card, 'card_origem_id', None)
+        data['card_origem_id']     = card.card_origem_id
         return Response(data)
 
     if request.method == 'DELETE':
@@ -1086,17 +1089,13 @@ def card_detail(request, card_id):
         card.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
-    # PATCH — qualquer membro pode atualizar campos básicos
-    # FIX: 'status' removido da lista — não é coluna no banco, é property derivada
-    # de card.coluna.e_final. Incluí-lo causava setattr silencioso que não persistia.
-    # Para alterar o "status" de um card, use 'coluna_id'.
+    # PATCH — 'status' NÃO entra (property derivada). Use 'coluna_id'.
     campos_simples = ['titulo', 'descricao', 'prioridade',
                       'passos_reproducao', 'resultado_esperado']
     for campo in campos_simples:
         if campo in request.data:
             setattr(card, campo, request.data[campo])
 
-    # Mover de coluna
     if 'coluna_id' in request.data:
         try:
             nova_coluna = ColunasBoard.objects.get(pk=request.data['coluna_id'], projeto=projeto)
@@ -1115,7 +1114,6 @@ def card_detail(request, card_id):
         _registrar_historico(card, request.user, 'MUDANCA_COLUNA',
                              f'{coluna_anterior} → {nova_coluna.nome}')
 
-    # Alterar responsável
     if 'responsavel_id' in request.data:
         resp_id = request.data['responsavel_id']
         if resp_id is None:
@@ -1130,7 +1128,6 @@ def card_detail(request, card_id):
             except Usuario.DoesNotExist:
                 return Response({'detail': 'Responsável não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
-    # Alterar prazo — exige justificativa se card já iniciado
     if 'due_date' in request.data:
         if card.sprint and card.sprint.status == 'ATIVA':
             justificativa = request.data.get('justificativa_prazo', '').strip()
@@ -1139,7 +1136,7 @@ def card_detail(request, card_id):
                     {'detail': 'justificativa_prazo é obrigatória ao alterar due_date de card em sprint ativa.'},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
-            from .models import JustificativaPrazo
+            # FIX (#2): JustificativaPrazo vem do import no topo do módulo.
             JustificativaPrazo.objects.create(
                 card=card,
                 usuario=request.user,
@@ -1183,7 +1180,7 @@ def card_historico(request, card_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def card_marcar_visto(request, card_id):
-    """POST /cards/<id>/marcar-visto/ — limpa flags de novidade para o usuário."""
+    """POST /cards/<id>/marcar-visto/"""
     try:
         card = Card.objects.get(pk=card_id)
     except Card.DoesNotExist:
@@ -1204,7 +1201,7 @@ def card_marcar_visto(request, card_id):
 def _get_card_e_cargo(request, card_id):
     """Helper: retorna (card, cargo, err_response)."""
     try:
-        card = Card.objects.select_related('projeto', 'sprint').get(pk=card_id)
+        card = Card.objects.select_related('projeto', 'sprint', 'coluna', 'responsavel').get(pk=card_id)
     except Card.DoesNotExist:
         return None, None, Response({'detail': 'Card não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
     _, cargo, err = _get_projeto_ou_403(request.user, card.projeto_id)
@@ -1214,7 +1211,7 @@ def _get_card_e_cargo(request, card_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def card_estimativa_enviar(request, card_id):
-    """POST /cards/<id>/estimativas/enviar/ — Gerente marca card para estimativa."""
+    """POST /cards/<id>/estimativas/enviar/"""
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
@@ -1263,7 +1260,6 @@ def card_estimativas(request, card_id):
         )
         return Response({'id': estimativa.id, 'valor': estimativa.valor}, status=status.HTTP_201_CREATED)
 
-    # GET — DEV/QA vê apenas o próprio voto antes da revelação
     votos = Estimativa.objects.filter(card=card).select_related('usuario')
     revelados = votos.filter(revelada=True).exists()
 
@@ -1287,7 +1283,7 @@ def card_estimativas(request, card_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def card_estimativa_revelar(request, card_id):
-    """POST /cards/<id>/estimativas/revelar/ — Gerente revela votos e consolida."""
+    """POST /cards/<id>/estimativas/revelar/"""
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
@@ -1450,9 +1446,7 @@ def card_vinculos(request, card_id):
         return err
 
     if request.method == 'GET':
-        # FIX: o operador | entre querysets com select_related distintos descarta
-        # o select_related do segundo queryset e pode gerar comportamento indefinido.
-        # Substituído por Q para uma única query com select_related correto.
+        # FIX: Q em vez de | entre querysets (preserva select_related).
         vinculos = CardVinculo.objects.filter(
             Q(card_origem=card) | Q(card_destino=card)
         ).select_related('card_origem', 'card_destino')
@@ -1467,7 +1461,6 @@ def card_vinculos(request, card_id):
             for v in vinculos
         ])
 
-    # POST — apenas GERENTE
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes podem criar vínculos.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1485,7 +1478,7 @@ def card_vinculos(request, card_id):
     except Card.DoesNotExist:
         return Response({'detail': 'Card destino não encontrado neste projeto.'}, status=status.HTTP_404_NOT_FOUND)
 
-    if CardVinculo.objects.filter(card_origem=card, card_destino=destino).exists():
+    if CardVinculo.objects.filter(card_origem=card, card_destino=destino, tipo_vinculo=tipo_vinculo).exists():
         return Response({'detail': 'Vínculo já existe.'}, status=status.HTTP_400_BAD_REQUEST)
 
     vinculo = CardVinculo.objects.create(
@@ -1557,8 +1550,6 @@ def card_comentarios(request, card_id):
             f'{request.user.nome} comentou:\n\n{texto}',
         )
 
-    # FIX: get_or_create inclui 'tipo' no lookup para não colidir com notificações
-    # de outros tipos (ex: ATRIBUICAO) já existentes para o mesmo card/usuário.
     membros_ids = ProjetoMembro.objects.filter(
         projeto_id=card.projeto_id
     ).exclude(usuario=request.user).values_list('usuario_id', flat=True)
@@ -1603,7 +1594,6 @@ def comentario_detail(request, comentario_id):
         comentario.save(update_fields=['texto', 'editado_em'])
         return Response(_serializar_comentario(comentario))
 
-    # DELETE
     if not eh_autor and not eh_gerente:
         return Response({'detail': 'Sem permissão para remover este comentário.'}, status=status.HTTP_403_FORBIDDEN)
     comentario.delete()
@@ -1617,7 +1607,7 @@ def comentario_detail(request, comentario_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def card_anexos(request, card_id):
-    """POST /cards/<id>/anexos/ — upload de arquivo direto no card."""
+    """POST /cards/<id>/anexos/"""
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
@@ -1626,10 +1616,6 @@ def card_anexos(request, card_id):
     if not arquivo:
         return Response({'detail': 'Arquivo é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # FIX: Anexo.url é TextField (não FileField). O upload deve ser feito para o
-    # storage externo antes desta view e a URL resultante passada no body como 'url'.
-    # Aqui aceitamos 'url' do body ou, como fallback temporário de dev, geramos
-    # um caminho relativo. Em produção, implemente o upload para S3/GCS antes de criar o Anexo.
     url = request.data.get('url', f'/media/anexos/{arquivo.name}')
 
     anexo = Anexo.objects.create(
@@ -1648,7 +1634,7 @@ def card_anexos(request, card_id):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def comentario_anexos(request, comentario_id):
-    """POST /cards/comentarios/<id>/anexos/ — upload em comentário específico."""
+    """POST /cards/comentarios/<id>/anexos/"""
     try:
         comentario = Comentario.objects.select_related('card__projeto').get(pk=comentario_id)
     except Comentario.DoesNotExist:
@@ -1662,7 +1648,6 @@ def comentario_anexos(request, comentario_id):
     if not arquivo:
         return Response({'detail': 'Arquivo é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # FIX: mesma correção de card_anexos — url é TEXT no banco, não FileField.
     url = request.data.get('url', f'/media/anexos/{arquivo.name}')
 
     anexo = Anexo.objects.create(
@@ -1704,10 +1689,7 @@ def anexo_detail(request, anexo_id):
     if not eh_dono and not eh_gerente:
         return Response({'detail': 'Sem permissão para remover este anexo.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # FIX: Anexo.url é TextField simples — NÃO chamar arquivo.delete().
-    # A exclusão física do arquivo no storage externo (S3, GCS, etc.) deve ser
-    # feita via SDK do storage antes ou depois desta linha, de acordo com a
-    # implementação do projeto. Aqui apenas removemos o registro do banco.
+    # Anexo.url é TextField — NÃO chamar arquivo.delete().
     anexo.delete()
     return Response(status=status.HTTP_204_NO_CONTENT)
 
@@ -1738,7 +1720,6 @@ def card_validacao(request, card_id):
             for v in validacoes
         ])
 
-    # POST — apenas QA
     if cargo != 'QA' and not request.user.admin:
         return Response({'detail': 'Apenas membros com cargo QA podem registrar validações.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1799,7 +1780,6 @@ def card_impedimento(request, card_id):
 
         return Response({'detail': 'Impedimento registrado.', 'impedido': True})
 
-    # DELETE
     card.impedido = False
     card.save(update_fields=['impedido'])
     _registrar_historico(card, request.user, 'IMPEDIMENTO_REMOVIDO', 'Impedimento removido.')

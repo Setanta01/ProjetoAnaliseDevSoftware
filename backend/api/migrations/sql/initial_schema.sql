@@ -273,6 +273,19 @@ CREATE INDEX idx_cards_prioridade  ON cards(prioridade);
 CREATE INDEX idx_cards_due_date    ON cards(due_date);
 
 -- =============================================================
+-- ORIGEM DO CARD (Hierarquia)
+-- =============================================================
+
+ALTER TABLE cards
+    ADD COLUMN card_origem_id INT;
+
+ALTER TABLE cards
+    ADD CONSTRAINT fk_card_origem
+    FOREIGN KEY (card_origem_id) REFERENCES cards(id) ON DELETE SET NULL;
+
+CREATE INDEX idx_cards_card_origem ON cards(card_origem_id);
+
+-- =============================================================
 -- VÍNCULOS ENTRE CARDS
 -- =============================================================
 

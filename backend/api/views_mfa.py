@@ -10,7 +10,6 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework_simplejwt.tokens import RefreshToken
 
 from .models import Usuario, ConviteSistema
 from .mfa_utils import (
@@ -18,32 +17,11 @@ from .mfa_utils import (
     verificar_mfa_token,
     enviar_otp_email,
     gerar_qrcode_base64,
+    # FIX (#9): helpers de token agora vivem em mfa_utils (fonte única),
+    # importados aqui e também em views.py — sem duplicação nem import circular.
+    _emitir_tokens,
+    _resposta_mfa_pendente,
 )
-
-
-# ─── Helpers internos ─────────────────────────────────────────────────────────
-
-def _emitir_tokens(user: Usuario) -> dict:
-    """Retorna o par access/refresh definitivos para um usuário."""
-    refresh = RefreshToken.for_user(user)
-    return {
-        'access': str(refresh.access_token),
-        'refresh': str(refresh),
-    }
-
-
-def _resposta_mfa_pendente(user: Usuario) -> Response:
-    """
-    Retorna a resposta padrão quando o usuário passou na senha mas ainda
-    precisa completar o segundo fator.
-    Chave padronizada como 'mfa_token' (compatível com mfa_challenge e views.py).
-    """
-    mfa_token = gerar_mfa_token(user.id)
-    return Response({
-        'mfa_required': True,
-        'mfa_tipo': user.mfa_tipo,   # 'TOTP' | 'EMAIL'
-        'mfa_token': mfa_token,       # usado em /api/mfa/challenge/
-    }, status=status.HTTP_200_OK)
 
 
 # ─── GOOGLE OAUTH ─────────────────────────────────────────────────────────────
@@ -120,8 +98,6 @@ def google_login(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        # FIX: import de timezone movido para o topo do módulo — era feito dentro
-        # do bloco if, o que funciona mas é anti-padrão e dificulta linting.
         if convite.expira_em and convite.expira_em < timezone.now():
             return Response({'error': 'Convite expirado.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -351,11 +327,6 @@ def mfa_disable(request):
     Body: { "password": "senha_atual" }
 
     DELETE /api/mfa/disable/
-
-    FIX: a verificação anterior usava request.data.get('password', ''), o que
-    tornava impossível distinguir "campo ausente" de "senha vazia" — ambos
-    retornavam 'Senha incorreta' para usuários com senha cadastrada.
-    Agora verificamos explicitamente se o campo foi enviado.
     """
     user = request.user
 

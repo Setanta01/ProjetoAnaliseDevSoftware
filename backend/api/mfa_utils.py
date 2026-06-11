@@ -1,9 +1,14 @@
 # backend/api/mfa_utils.py
 """
 Utilitários para MFA:
+  - Emissão de tokens JWT definitivos / resposta de MFA pendente
   - Envio de OTP por e-mail
   - Geração e verificação do mfa_token (JWT temporário de 5 min)
   - Geração de QR code base64 para TOTP
+
+NOTA: _emitir_tokens e _resposta_mfa_pendente vivem AQUI (e não em views.py)
+para que tanto views.py quanto views_mfa.py possam importá-los sem criar
+import circular entre os dois módulos de views.
 """
 
 import jwt
@@ -14,6 +19,35 @@ from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
 from django.core.mail import send_mail
+
+from rest_framework.response import Response
+from rest_framework import status
+from rest_framework_simplejwt.tokens import RefreshToken
+
+
+# ─── EMISSÃO DE TOKENS / RESPOSTA MFA ─────────────────────────────────────────
+
+def _emitir_tokens(user) -> dict:
+    """Retorna o par access/refresh definitivos para um usuário."""
+    refresh = RefreshToken.for_user(user)
+    return {
+        'access': str(refresh.access_token),
+        'refresh': str(refresh),
+    }
+
+
+def _resposta_mfa_pendente(user) -> Response:
+    """
+    Resposta padrão quando o usuário passou na senha mas ainda precisa
+    completar o segundo fator. Chave padronizada como 'mfa_token'
+    (compatível com mfa_challenge e auth_login).
+    """
+    mfa_token = gerar_mfa_token(user.id)
+    return Response({
+        'mfa_required': True,
+        'mfa_tipo': user.mfa_tipo,   # 'TOTP' | 'EMAIL'
+        'mfa_token': mfa_token,       # usado em /api/mfa/challenge/
+    }, status=status.HTTP_200_OK)
 
 
 # ─── MFA TOKEN (JWT temporário) ───────────────────────────────────────────────
