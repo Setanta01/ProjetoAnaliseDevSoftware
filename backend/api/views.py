@@ -266,7 +266,7 @@ def auth_ativar_convite(request):
     if convite.expira_em and convite.expira_em < timezone.now():
         return Response({'detail': 'Convite expirado.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # FIX (#8): impede account takeover. Não sobrescreve senha de conta já ativa.
+    # Tenta buscar o usuário existente ou cria um novo
     try:
         existente = Usuario.objects.get(email=convite.email)
         if existente.ativo:
@@ -274,19 +274,25 @@ def auth_ativar_convite(request):
                 {'detail': 'Já existe uma conta ativa para este e-mail. Use a recuperação de senha.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        user = existente  # conta inativa → ativar
+        user = existente
     except Usuario.DoesNotExist:
+        # CORREÇÃO: Adicionado 'convidado_por=convite.criado_por'
         user = Usuario.objects.create(
             email=convite.email,
             nome=convite.email.split('@')[0],
             ativo=False,
             admin=convite.admin,
+            convidado_por=convite.criado_por,  # <-- AQUI
         )
 
+    # Atualiza os dados do usuário
     user.admin = convite.admin
     user.ativo = True
+    user.convidado_por = convite.criado_por # <-- AQUI (garante que, se o usuário já existia inativo, ele pega o conviter)
     user.set_password(senha)
-    user.save(update_fields=['admin', 'ativo', 'senha_hash'])
+    
+    # Salva apenas os campos alterados
+    user.save(update_fields=['admin', 'ativo', 'senha_hash', 'convidado_por'])
 
     convite.usado = True
     convite.save(update_fields=['usado'])
