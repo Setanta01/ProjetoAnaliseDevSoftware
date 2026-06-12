@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google'
+import { useQuery } from '@tanstack/react-query'
 import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import api from '@/api'
 import { BrandMark } from '@/components/app/BrandMark'
 import { Alert } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -9,25 +11,15 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { DemoWorkspace } from '@/demo/DemoWorkspace'
-import { demoProfiles, type DemoProfile } from '@/demo/data'
+import { demoProfiles } from '@/demo/data'
 import MfaChallenge from '@/auth/MfaChallenge'
 import { FirstAdminSetupPage, InviteActivationPage } from '@/auth/RegistrationPages'
 import type { MfaTipo } from '@/hooks/useMFA'
 import { getErrorMessage } from '@/lib/errors'
-import { apiBaseUrl, isDemoMode, requiresInitialAdmin } from '@/lib/env'
-import type { Cargo } from '@/types'
+import { isDemoMode } from '@/lib/env'
+import type { Cargo, UserProfile } from '@/types'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
-
-interface UserProfile {
-  id: number
-  username: string
-  email: string
-  cargo: Cargo
-  mfa_ativo: boolean
-  mfa_tipo: MfaTipo | null
-  tem_google: boolean
-}
 
 interface AuthTokens {
   access: string
@@ -45,19 +37,8 @@ interface LoginResponse extends Partial<AuthTokens> {
   mfa_tipo?: MfaTipo
 }
 
-async function apiFetch<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
-  const token = localStorage.getItem('access_token')
-  const response = await fetch(`${apiBaseUrl.replace(/\/$/, '')}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...(options.headers ?? {}),
-    },
-  })
-  const data: unknown = await response.json()
-  if (!response.ok) throw data
-  return data as T
+interface BootstrapStatus {
+  bootstrap_disponivel: boolean
 }
 
 function saveTokens(tokens: AuthTokens) {
@@ -72,14 +53,20 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
   const [mfaPending, setMfaPending] = useState<MfaPending | null>(null)
 
   const fetchProfile = useCallback(async () => {
-    const profile = await apiFetch<UserProfile>('/profile/')
+    const profile = await api.get<UserProfile>('/auth/profile/').then((response) => response.data)
     onAuthenticated(profile)
   }, [onAuthenticated])
 
   const completeLogin = async (tokens: AuthTokens) => {
     saveTokens(tokens)
     setMfaPending(null)
-    await fetchProfile()
+    try {
+      await fetchProfile()
+    } catch (error) {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      throw error
+    }
   }
 
   const handleAuthResponse = async (data: LoginResponse) => {
@@ -95,10 +82,10 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
     setFeedback(null)
     setLoading(true)
     try {
-      const data = await apiFetch<LoginResponse>('/token/', {
-        method: 'POST',
-        body: JSON.stringify({ email: form.email, password: form.password }),
-      })
+      const data = await api.post<LoginResponse>('/auth/login/', {
+        email: form.email,
+        senha: form.password,
+      }).then((response) => response.data)
       await handleAuthResponse(data)
     } catch (error) {
       setFeedback({ message: getErrorMessage(error, 'Credenciais inválidas.'), tone: 'destructive' })
@@ -112,10 +99,7 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
     setFeedback(null)
     setLoading(true)
     try {
-      const data = await apiFetch<LoginResponse>('/auth/google/', {
-        method: 'POST',
-        body: JSON.stringify({ id_token: credential }),
-      })
+      const data = await api.post<LoginResponse>('/auth/google/', { id_token: credential }).then((response) => response.data)
       await handleAuthResponse(data)
     } catch (error) {
       setFeedback({ message: getErrorMessage(error, 'Erro ao entrar com Google.'), tone: 'destructive' })
@@ -199,9 +183,14 @@ export default function App() {
   const navigate = useNavigate()
   const savedDemoRole = localStorage.getItem('lazuli_demo_role') as Cargo | null
   const [profile, setProfile] = useState<UserProfile | null>(isDemoMode && savedDemoRole && demoProfiles[savedDemoRole] ? demoProfiles[savedDemoRole] : null)
-  const [initialAdminCreated, setInitialAdminCreated] = useState(localStorage.getItem('lazuli_initial_admin_created') === 'true')
   const [checkingSession, setCheckingSession] = useState(!isDemoMode && Boolean(localStorage.getItem('access_token')))
-  const needsInitialAdmin = requiresInitialAdmin && !initialAdminCreated
+  const bootstrapQuery = useQuery({
+    queryKey: ['auth-bootstrap-status'],
+    queryFn: () => api.get<BootstrapStatus>('/auth/bootstrap-status/').then((response) => response.data),
+    enabled: !isDemoMode,
+    retry: false,
+  })
+  const needsInitialAdmin = !isDemoMode && bootstrapQuery.data?.bootstrap_disponivel === true
 
   const handleAuthenticated = useCallback((nextProfile: UserProfile) => {
     setProfile(nextProfile)
@@ -211,7 +200,7 @@ export default function App() {
   useEffect(() => {
     if (isDemoMode) return
     if (!localStorage.getItem('access_token')) return
-    apiFetch<UserProfile>('/profile/')
+    api.get<UserProfile>('/auth/profile/').then((response) => response.data)
       .then(handleAuthenticated)
       .catch(() => {
         localStorage.removeItem('access_token')
@@ -221,12 +210,17 @@ export default function App() {
       .finally(() => setCheckingSession(false))
   }, [handleAuthenticated, navigate])
 
-  const handleLogout = () => {
-    localStorage.removeItem('access_token')
-    localStorage.removeItem('refresh_token')
-    localStorage.removeItem('lazuli_demo_role')
-    setProfile(null)
-    navigate('/login', { replace: true })
+  const handleLogout = async () => {
+    const refresh = localStorage.getItem('refresh_token')
+    try {
+      if (!isDemoMode && refresh) await api.post('/auth/logout/', { refresh })
+    } finally {
+      localStorage.removeItem('access_token')
+      localStorage.removeItem('refresh_token')
+      localStorage.removeItem('lazuli_demo_role')
+      setProfile(null)
+      navigate('/login', { replace: true })
+    }
   }
 
   const enterDemo = () => {
@@ -236,28 +230,29 @@ export default function App() {
     navigate('/app/projects', { replace: true })
   }
 
-  if (checkingSession) {
+  if (checkingSession || (!isDemoMode && bootstrapQuery.isLoading)) {
     return <div className="auth-background min-h-screen" />
   }
 
   return (
     <Routes>
       <Route path="/login" element={needsInitialAdmin ? <Navigate to="/setup-admin" replace /> : profile ? <Navigate to={isDemoMode ? '/app/projects' : '/app'} replace /> : <AuthPage onAuthenticated={handleAuthenticated} onEnterDemo={enterDemo} />} />
-      <Route path="/setup-admin" element={<FirstAdminSetupPage onComplete={() => { localStorage.setItem('lazuli_initial_admin_created', 'true'); setInitialAdminCreated(true); navigate('/login', { replace: true }) }} />} />
+      <Route path="/setup-admin" element={(isDemoMode || needsInitialAdmin) ? <FirstAdminSetupPage onComplete={async () => { await bootstrapQuery.refetch(); navigate('/login', { replace: true }) }} /> : <Navigate to="/login" replace />} />
       <Route path="/activate-invite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
+      <Route path="/ativar-convite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
       {isDemoMode ? (
         <Route
           path="/app/*"
           element={profile ? (
             <DemoWorkspace
-              initialProfile={profile as DemoProfile}
-              onProfileChange={setProfile}
-              onExit={handleLogout}
+              initialProfile={profile}
+              onProfileChange={(nextProfile) => setProfile(nextProfile)}
+              onExit={() => void handleLogout()}
             />
           ) : <Navigate to="/login" replace />}
         />
       ) : (
-        <Route path="/app/*" element={profile ? <DemoWorkspace initialProfile={profile as DemoProfile} onProfileChange={setProfile} onExit={handleLogout} demoMode={false} /> : <Navigate to="/login" replace />} />
+        <Route path="/app/*" element={profile ? <DemoWorkspace initialProfile={profile} onProfileChange={(nextProfile) => setProfile(nextProfile)} onExit={() => void handleLogout()} demoMode={false} /> : <Navigate to="/login" replace />} />
       )}
       <Route path="*" element={<Navigate to={needsInitialAdmin ? '/setup-admin' : profile ? (isDemoMode ? '/app/projects' : '/app') : '/login'} replace />} />
     </Routes>

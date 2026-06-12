@@ -9,10 +9,10 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 ## 1. Fluxo de Convite, Autenticação e Segurança
 
 ### Cenário 0: Primeiro Boot da Instalação
-1. Enquanto não existir nenhum administrador, a aplicação exibe uma rota pública e temporária para criação da primeira conta administrativa.
-2. A criação dessa conta inicializa o sistema de contas e encerra permanentemente o estado de primeiro boot.
+1. Enquanto não existir nenhuma conta, o frontend consulta `GET /api/auth/bootstrap-status/` e exibe uma rota pública e temporária para criação da primeira conta administrativa.
+2. A criação chama `POST /api/auth/bootstrap-admin/`, inicializa o sistema de contas e encerra permanentemente o estado de primeiro boot.
 3. Depois disso, não existe cadastro público livre: novos usuários entram apenas por convite enviado por um administrador.
-4. O frontend pode representar esse estado com `VITE_FIRST_BOOT` durante desenvolvimento, mas a decisão definitiva deve vir do backend para evitar reabrir o cadastro inicial por configuração incorreta do cliente.
+4. A disponibilidade é decidida exclusivamente pelo backend; configuração do cliente não pode reabrir o cadastro inicial.
 
 ### Cenário 1: Entrada no Sistema
 1. O **Administrador** acessa o painel de usuários e envia um convite (`POST /api/admin/convites/`) inserindo o e-mail de um novo colaborador.
@@ -21,7 +21,7 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 
 ### Cenário 2: Login com MFA (Multi-Factor Authentication)
 1. O usuário tenta fazer login com as credenciais cadastradas (`POST /api/auth/login/`).
-2. O backend valida a senha, mas, se o `mfa_ativo` estiver `true`, não devolve o JWT final imediatamente. Retorna um `token_temp` (válido por 5 minutos) e o aviso `mfa_required: true`.
+2. O backend valida a senha, mas, se o `mfa_ativo` estiver `true`, não devolve o JWT final imediatamente. Retorna um `mfa_token` (válido por 5 minutos) e o aviso `mfa_required: true`.
 3. O usuário insere o código (TOTP ou OTP de e-mail) e chama o endpoint de desafio (`POST /api/auth/mfa/challenge/`). Somente então recebe o par de tokens JWT (`access` e `refresh`) para navegação.
 
 ### Cenário 3: Entrada e Navegação Principal

@@ -206,6 +206,9 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   }
 
   if (method === 'GET' && path === '/mfa/status') return response(config, { mfa_ativo: database.mfa.active, mfa_tipo: database.mfa.type })
+  if (method === 'GET' && path === '/auth/bootstrap-status') return response(config, { bootstrap_disponivel: true })
+  if (method === 'POST' && path === '/auth/bootstrap-admin') return response(config, { id: 1, nome: 'Admin Demonstração', email: 'admin@empresa.com', admin: true }, 201)
+  if (method === 'GET' && path === '/auth/convite-info') return response(config, { email: 'colaborador@empresa.com', admin: false })
   if (method === 'POST' && path === '/auth/ativar-convite') return response(config, { message: 'Conta ativada no modo demonstração.' }, 201)
   if (method === 'POST' && path === '/mfa/setup/totp') return response(config, { secret: 'LAZULI-DEMO-SECRET', qrcode: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZB1sAAAAASUVORK5CYII=', uri: 'otpauth://totp/Lazuli:demo' })
   if (method === 'POST' && path === '/mfa/setup/email') return response(config, { message: 'Código de demonstração enviado.' })

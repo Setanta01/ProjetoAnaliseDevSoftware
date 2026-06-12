@@ -2,10 +2,10 @@
 
 ## Highest Priority
 
-- [ ] Add a backend first-boot status/bootstrap endpoint with an atomic guarantee
+- [x] Add a backend first-boot status/bootstrap endpoint with an atomic guarantee
   that only the first administrator can be created.
-- [ ] Replace frontend `VITE_FIRST_BOOT` authority with the backend bootstrap
-  status. Keep the environment variable only as an explicit development aid.
+- [x] Replace frontend `VITE_FIRST_BOOT` authority with the backend bootstrap
+  status.
 - [ ] Resolve the conflict between invitation-only registration and the current
   Google OAuth contract that creates a user on first access.
 - [ ] Connect **Projetos Admin** create, edit, archive, and delete actions to the
@@ -31,7 +31,10 @@
 
 ## Authentication and Account Management
 
-- [ ] Wire first-administrator creation to the new backend endpoint.
+Track detailed completion status and contract blockers in
+[`AUTH_FLOW_TRACKER.md`](./AUTH_FLOW_TRACKER.md).
+
+- [x] Wire first-administrator creation to the new backend endpoint.
 - [ ] Test invitation activation with expired, invalid, reused, and valid tokens.
 - [ ] Implement password recovery and reset pages using documented endpoints.
 - [ ] Run Google OAuth and MFA integration tests outside demo mode.

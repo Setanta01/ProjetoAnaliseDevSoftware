@@ -42,15 +42,13 @@ Set the local environment to:
 VITE_DEMO_MODE=false
 VITE_API_URL=http://localhost:8000
 VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-VITE_FIRST_BOOT=false
 ```
 
 Demo mode is additionally guarded by `import.meta.env.DEV`, so production builds always use real authentication and API behavior.
 
-Set `VITE_FIRST_BOOT=true` only while the installation still needs its first
-administrator. After that account is created, the backend or deployment
-configuration must disable the first-boot route. Normal users register only
-through an administrator invitation.
+The frontend reads `/api/auth/bootstrap-status/` to decide whether first-admin
+setup is available. Normal users register only through an administrator
+invitation.
 
 ## Quality checks
 
