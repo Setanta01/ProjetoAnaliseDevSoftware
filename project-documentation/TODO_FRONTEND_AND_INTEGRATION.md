@@ -50,6 +50,8 @@
 
 ## Quality and Maintenance
 
+- [ ] Expand React Query usage for server-state cache updates and optimistic
+  mutations on project, board, comment, checklist, and admin flows.
 - [ ] Add component and route tests for project-scoped navigation and role
   permissions.
 - [ ] Add mock-adapter contract tests so fixture routes remain aligned with DRF.
