@@ -6,6 +6,7 @@ from datetime import timedelta, datetime
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.core.mail import send_mail
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
@@ -180,9 +181,14 @@ def auth_bootstrap_admin(request):
         )
 
     try:
+        validate_email(email)
+    except ValidationError:
+        return Response({'detail': 'Informe um endereço de e-mail válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
         validate_password(senha)
     except ValidationError as error:
-        return Response({'detail': list(error.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'detail': ' '.join(error.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
     try:
         with transaction.atomic():

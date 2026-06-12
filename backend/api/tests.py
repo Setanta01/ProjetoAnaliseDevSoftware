@@ -96,3 +96,18 @@ class BootstrapAdminTests(TestCase):
 
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.data, {'detail': 'As senhas não coincidem.'})
+
+    def test_rejects_invalid_email_before_database_access(self):
+        response = views.auth_bootstrap_admin(self.factory.post(
+            '/api/auth/bootstrap-admin/',
+            {
+                'nome': 'Admin Inicial',
+                'email': 'email-invalido',
+                'senha': 'SenhaForte!2026',
+                'confirmar_senha': 'SenhaForte!2026',
+            },
+            format='json',
+        ))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'detail': 'Informe um endereço de e-mail válido.'})
