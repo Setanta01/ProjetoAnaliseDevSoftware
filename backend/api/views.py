@@ -4,9 +4,11 @@ import secrets
 from datetime import timedelta, datetime
 
 from django.contrib.auth import authenticate
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
 from django.core.mail import send_mail
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q, Count
 from django.utils import timezone
 
@@ -56,6 +58,7 @@ COLUNAS_PADRAO = [
 ]
 
 COLUNA_VALIDACAO_NOME = 'Validação/QA'
+BOOTSTRAP_ADMIN_LOCK_ID = 12648430
 
 
 def _cargo_no_projeto(user, projeto):
@@ -148,6 +151,64 @@ def _serializar_comentario(c):
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. AUTENTICAÇÃO
 # ─────────────────────────────────────────────────────────────────────────────
+
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def auth_bootstrap_status(request):
+    """GET /auth/bootstrap-status/ — informa se o primeiro admin pode ser criado."""
+    return Response({'bootstrap_disponivel': not Usuario.objects.exists()})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def auth_bootstrap_admin(request):
+    """POST /auth/bootstrap-admin/ — cria, uma única vez, o primeiro administrador."""
+    nome = request.data.get('nome', '').strip()
+    email = request.data.get('email', '').strip().lower()
+    senha = request.data.get('senha', '')
+    confirmar_senha = request.data.get('confirmar_senha', '')
+
+    if not nome or not email or not senha:
+        return Response(
+            {'detail': 'Nome, e-mail e senha são obrigatórios.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if senha != confirmar_senha:
+        return Response(
+            {'detail': 'As senhas não coincidem.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        validate_password(senha)
+    except ValidationError as error:
+        return Response({'detail': list(error.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        with transaction.atomic():
+            # The transaction-level advisory lock serializes concurrent first-boot requests.
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_advisory_xact_lock(%s)', [BOOTSTRAP_ADMIN_LOCK_ID])
+
+            if Usuario.objects.exists():
+                return Response(
+                    {'detail': 'O sistema já possui uma conta e não aceita novo bootstrap.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            user = Usuario(nome=nome, email=email, admin=True, ativo=True)
+            user.set_password(senha)
+            user.save(force_insert=True)
+    except IntegrityError:
+        return Response(
+            {'detail': 'Não foi possível criar o primeiro administrador.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    return Response(
+        {'id': user.id, 'nome': user.nome, 'email': user.email, 'admin': user.admin},
+        status=status.HTTP_201_CREATED,
+    )
 
 @api_view(['POST'])
 @permission_classes([AllowAny])

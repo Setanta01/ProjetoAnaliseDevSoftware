@@ -21,6 +21,8 @@
 
 | Método | Rota                           | Perm.    | Descrição e Payload                                                                                             |
 | ------ | ------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/auth/bootstrap-status/`      | `[PUB]`  | Retorna `bootstrap_disponivel=true` somente enquanto nenhuma conta existir.                                    |
+| `POST` | `/auth/bootstrap-admin/`       | `[PUB]`  | **Payload:** `nome`, `email`, `senha`, `confirmar_senha`. Cria atomicamente o primeiro administrador e fica permanentemente indisponível após a primeira conta. |
 | `POST` | `/auth/login/`                 | `[PUB]`  | **Payload:** `email`, `senha`. Retorna JWT completo. Se MFA ativo, retorna `mfa_required: true` e `token_temp`. |
 | `POST` | `/auth/google/`                | `[PUB]`  | Autentica via Google OAuth e regista o utilizador no primeiro acesso.                                           |
 | `POST` | `/token/`                      | `[PUB]`  | Obtém par Access/Refresh Token (SimpleJWT).                                                                     |
