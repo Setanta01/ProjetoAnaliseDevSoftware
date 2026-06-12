@@ -189,6 +189,8 @@ export default function App() {
     queryFn: () => api.get<BootstrapStatus>('/auth/bootstrap-status/').then((response) => response.data),
     enabled: !isDemoMode,
     retry: false,
+    staleTime: 0,
+    refetchOnMount: 'always',
   })
   const needsInitialAdmin = !isDemoMode && bootstrapQuery.data?.bootstrap_disponivel === true
 
@@ -232,6 +234,20 @@ export default function App() {
 
   if (checkingSession || (!isDemoMode && bootstrapQuery.isLoading)) {
     return <div className="auth-background min-h-screen" />
+  }
+
+  if (!isDemoMode && bootstrapQuery.isError) {
+    return (
+      <main className="auth-background flex min-h-screen items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardContent className="space-y-4 p-8 text-center">
+            <p className="font-semibold text-foreground">Não foi possível verificar a inicialização do sistema.</p>
+            <p className="text-sm text-muted-foreground">Confirme se o backend e o banco de dados estão em execução.</p>
+            <Button onClick={() => void bootstrapQuery.refetch()}>Tentar novamente</Button>
+          </CardContent>
+        </Card>
+      </main>
+    )
   }
 
   return (

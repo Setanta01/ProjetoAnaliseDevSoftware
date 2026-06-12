@@ -6,6 +6,7 @@
   that only the first administrator can be created.
 - [x] Replace frontend `VITE_FIRST_BOOT` authority with the backend bootstrap
   status.
+- [x] Standardize API transactional email delivery on the official Resend SDK.
 - [ ] Resolve the conflict between invitation-only registration and the current
   Google OAuth contract that creates a user on first access.
 - [ ] Connect **Projetos Admin** create, edit, archive, and delete actions to the

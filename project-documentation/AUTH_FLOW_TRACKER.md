@@ -26,24 +26,23 @@ alone does not make a flow complete.
 | Google registration by invitation | Same Google login control can initiate the flow. | A new Google account is created only when an unused, unexpired invitation exists. | **Partial** | Update API documentation to reflect the invitation requirement, test invite consumption, and decide whether the activation-link route or Google login should be the expected entry point for invited Google users. |
 | MFA challenge during password or Google login | TOTP/email challenge UI, verification, cancellation, and email resend are implemented. | Challenge and resend endpoints exist and return final JWT tokens. | **Partial** | Configure email delivery and integration-test valid, invalid, expired, and resent codes for both MFA types. |
 | MFA setup and disable | Settings modal supports TOTP setup, email setup, verification, and disable actions. | Status, setup, verify, and disable endpoints exist. | **Partial** | Run end-to-end tests against the real backend and verify that the frontend HTTP method/payload for disable matches the backend contract. Verify email delivery through the selected provider. |
-| First administrator setup | Frontend reads bootstrap status, redirects first boot to `/setup-admin`, and submits the administrator form. | Status and one-time creation endpoints exist; creation uses a PostgreSQL transaction-level advisory lock. | **Partial** | Run an integration test against an empty PostgreSQL database, including simultaneous requests and the already-initialized response. |
+| First administrator setup | Frontend reads bootstrap status before rendering authentication routes, redirects first boot to `/setup-admin`, submits the administrator form, and shows a retry state if initialization cannot be checked. | Status and one-time creation endpoints exist; creation uses a PostgreSQL transaction-level advisory lock. | **Partial** | Run an integration test against an empty PostgreSQL database, including simultaneous requests and the already-initialized response. |
 | Administrator sends invitation | No production invitation-management screen exists. | `/api/admin/convites/` exists and creates invitation tokens. | **Missing** | Build the admin invitation UI, connect it to the endpoint, show delivery/errors, and test normal/admin invitations. |
 | Invited user opens activation link | Activation page supports both `/ativar-convite` from backend emails and `/activate-invite`, fetches invite information, and displays the real email/admin status. | `/api/auth/convite-info/` validates invitation status. | **Partial** | Integration-test missing, expired, used, invalid, user, and administrator invitations. |
 | Invited user activates account | Activation form submits the documented token and password fields, then returns to login. | `/api/auth/ativar-convite/` activates or creates the invited account and consumes the token. | **Partial** | Add real-backend integration tests and decide whether a dedicated success confirmation should precede the login redirect. |
 | Password recovery request | Login contains an inactive “forgot password” control. | `/api/auth/recuperar-senha/` creates a token and sends a recovery link. | **Missing** | Add the recovery-request route and form, connect the login link, and verify neutral responses that do not reveal whether an account exists. |
 | Password reset from email | No reset route or form exists. | `/api/auth/redefinir-senha/` accepts a token and new password. | **Missing** | Add `/redefinir-senha`, password confirmation and validation, token error states, and success redirect. Confirm `FRONTEND_URL` generates the correct frontend URL. |
-| Invitation and recovery email delivery | Frontend displays only generic request/error states. | Invitation and recovery endpoints send email; MFA email also sends OTP. | **Partial** | Standardize all auth email delivery on Resend as required by architecture, configure credentials/sender/domain, and test real delivery. The current MFA utility still calls Django `send_mail`, which conflicts with the documented provider decision. |
+| Invitation and recovery email delivery | Frontend displays generic recovery states and reports invitation delivery failures. | Invitation, recovery, MFA OTP, and other API email calls use the shared Resend SDK service. Failed invitation delivery removes the pending invitation so it can be retried. | **Partial** | Smoke-test real delivery to an allowed recipient and verify received invitation links, recovery links, and MFA codes. |
 | Route protection | `/app/*` redirects users without an in-memory profile to login. | JWT authentication protects API endpoints. | **Partial** | Complete profile restoration and token refresh. Verify expired/revoked token behavior and role-based access for admin routes. |
 
 ## Blocking Contract Corrections
 
 These corrections should be completed before broader authentication testing:
 
-1. Standardize auth email delivery on Resend.
-2. Add an administrator invitation-management screen.
-3. Configure `FRONTEND_URL` in each deployed backend environment so invitation
+1. Add an administrator invitation-management screen.
+2. Configure `FRONTEND_URL` in each deployed backend environment so invitation
    links reach `/ativar-convite` on the correct frontend origin.
-4. Exercise all implemented contracts against the real PostgreSQL database and
+3. Exercise all implemented contracts against the real PostgreSQL database and
    external identity/email providers.
 
 ## Completion Order

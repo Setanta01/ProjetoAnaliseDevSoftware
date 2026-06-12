@@ -7,7 +7,6 @@ from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
-from django.core.mail import send_mail
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q, Count
@@ -44,6 +43,7 @@ from .models import (
 # FIX (#9): helpers de emissão de token centralizados em mfa_utils — importados
 # aqui e em views_mfa sem risco de import circular.
 from .mfa_utils import enviar_otp_email, _emitir_tokens, _resposta_mfa_pendente
+from .email_service import EmailDeliveryError, enviar_email
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -99,16 +99,8 @@ def _registrar_historico(card, usuario, tipo, detalhe=''):
 
 
 def _enviar_email(destinatario, assunto, corpo):
-    """Wrapper seguro para send_mail — falha silenciosa em dev."""
-    try:
-        send_mail(
-            assunto, corpo,
-            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@lazuli.app'),
-            [destinatario],
-            fail_silently=False,
-        )
-    except Exception:
-        pass
+    """Mantém um ponto único para os disparos existentes da API."""
+    enviar_email(destinatario, assunto, corpo)
 
 
 def _serializar_card(card, tem_novidade=False):
@@ -383,9 +375,12 @@ def auth_recuperar_senha(request):
             token=token,
             expira_em=timezone.now() + timedelta(hours=2),
         )
-        link = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/redefinir-senha?token={token}"
-        _enviar_email(email, 'Recuperação de senha — Lazuli',
-                      f'Clique no link para redefinir sua senha (válido por 2h):\n\n{link}')
+        link = f"{settings.FRONTEND_URL}/redefinir-senha?token={token}"
+        try:
+            _enviar_email(email, 'Recuperação de senha — Lazuli',
+                          f'Clique no link para redefinir sua senha (válido por 2h):\n\n{link}')
+        except EmailDeliveryError:
+            pass
     except Usuario.DoesNotExist:
         pass
 
@@ -497,7 +492,7 @@ def admin_convites(request):
 
     token = secrets.token_urlsafe(40)
     try:
-        ConviteSistema.objects.create(
+        convite = ConviteSistema.objects.create(
             email=email,
             token=token,
             admin=admin,
@@ -507,9 +502,16 @@ def admin_convites(request):
     except IntegrityError:
         return Response({'detail': 'Erro ao gerar convite. Tente novamente.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    link = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/ativar-convite?token={token}"
-    _enviar_email(email, 'Você foi convidado para o Lazuli',
-                  f'Clique no link para ativar sua conta (válido por 24h):\n\n{link}')
+    link = f"{settings.FRONTEND_URL}/ativar-convite?token={token}"
+    try:
+        _enviar_email(email, 'Você foi convidado para o Lazuli',
+                      f'Clique no link para ativar sua conta (válido por 24h):\n\n{link}')
+    except EmailDeliveryError:
+        convite.delete()
+        return Response(
+            {'detail': 'Não foi possível enviar o convite por e-mail.'},
+            status=status.HTTP_502_BAD_GATEWAY,
+        )
 
     return Response({'detail': f'Convite enviado para {email}.'}, status=status.HTTP_201_CREATED)
 

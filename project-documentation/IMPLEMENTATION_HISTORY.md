@@ -80,6 +80,19 @@ prototype behavior.
 
 All three quality commands passed at the end of this implementation pass.
 
+## Authentication Integration Update - 2026-06-12
+
+* Added a shared transactional-email service using the official Resend SDK.
+* Migrated invitation, password recovery, MFA OTP, and existing API email
+  notifications away from Django `send_mail`.
+* Made failed invitation delivery remove the pending invitation so an
+  administrator can retry it.
+* Made production startup wait for `GET /api/auth/bootstrap-status/`, redirect
+  to `/setup-admin` when no accounts exist, and show a retry state when system
+  initialization cannot be determined.
+* Added automated coverage for the Resend payload, missing configuration, MFA
+  delivery, invitation failure cleanup, and first-administrator bootstrap.
+
 ## Known Visual Differences
 
 * Some font metrics and spacing differ slightly from the raster prototype.

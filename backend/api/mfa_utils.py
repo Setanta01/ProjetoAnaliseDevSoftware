@@ -18,11 +18,12 @@ import base64
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
-from django.core.mail import send_mail
 
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from .email_service import enviar_email
 
 
 # ─── EMISSÃO DE TOKENS / RESPOSTA MFA ─────────────────────────────────────────
@@ -97,17 +98,15 @@ def enviar_otp_email(usuario) -> None:
     """
     code = usuario.gerar_otp_email()
 
-    send_mail(
-        subject='Seu código de verificação — Lazuli',
-        message=(
+    enviar_email(
+        usuario.email,
+        'Seu código de verificação — Lazuli',
+        (
             f'Olá, {usuario.nome}!\n\n'
             f'Seu código de verificação é: {code}\n\n'
             f'Ele expira em 10 minutos.\n\n'
             f'Se você não solicitou este código, ignore este e-mail.'
         ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[usuario.email],
-        fail_silently=False,
     )
 
 
