@@ -76,8 +76,9 @@ committed. A flow is not complete merely because its screen or endpoint exists.
 - [x] Update `.env.example` files with placeholders only.
 - [x] Remove the Resend SDK dependency and `RESEND_API_KEY` configuration after
   all callers use the queue.
-- [ ] Run the real Gmail worker smoke test after the Gmail address and app
-  password are supplied. The console and in-memory worker paths already pass.
+- [x] Run the real Gmail worker smoke test after the Gmail address and app
+  password are supplied. On June 12, 2026, queue job `2` delivered the styled
+  invitation test to `lazuli.agil@gmail.com` in one attempt with no SMTP error.
 
 ### Correct the Existing Failure Semantics
 
@@ -120,18 +121,25 @@ committed. A flow is not complete merely because its screen or endpoint exists.
 ## Phase 4: Login Route and White-Screen Stabilization
 
 - [ ] Reproduce the post-login flicker using the real backend mode.
-- [ ] Remove the unnecessary authenticated navigation sequence from `/app` to
+- [x] Remove the unnecessary authenticated navigation sequence from `/app` to
   `/app/projects`; navigate directly to the projects landing route.
-- [ ] Ensure URL changes do not bounce through intermediate routes.
-- [ ] Keep the application shell mounted while project routes and React Query
+- [x] Ensure URL changes do not bounce through intermediate routes.
+- [x] Keep the application shell mounted while project routes and React Query
   data load.
-- [ ] Replace blank full-page loading output with a stable branded loading or
+- [x] Replace blank full-page loading output with a stable branded loading or
   page skeleton state.
-- [ ] Avoid clearing the current page merely because a query is refetching.
+- [x] Avoid clearing the current page merely because a query is refetching.
 - [ ] Verify login, session restoration, sidebar navigation, project selection,
   browser refresh, back, and forward navigation.
-- [ ] Add a focused route test that asserts one final post-login destination and
+- [x] Add a focused route test that asserts one final post-login destination and
   no redirect cycle.
+
+Implementation note (June 12, 2026): successful authentication now targets
+`/app/projects` directly. Session restoration preserves an existing nested
+`/app/...` URL, so refreshing a board or backlog no longer returns through the
+projects landing route. `npm test`, TypeScript, lint, and production build pass.
+The two unchecked items require an interactive browser pass against the real
+backend; no browser-test framework was added solely for this narrow fix.
 
 ## Phase 5: Required Account Flows
 

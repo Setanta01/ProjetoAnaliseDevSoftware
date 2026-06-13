@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
 import { demoProfiles } from '@/demo/data'
 import { resetDemoDatabase } from '@/demo/store'
+import { AUTHENTICATED_HOME } from '@/lib/auth-routing'
 import MfaSettingsModal from '@/auth/MfaSettingsModal'
 import CardDetailModal from '@/modals/CardDetailModal'
 import CreateCardModal from '@/modals/CreateCardModal'
@@ -59,13 +60,13 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
     localStorage.setItem('lazuli_demo_role', cargo)
     setProfile(nextProfile)
     onProfileChange(nextProfile)
-    navigate('/app/projects')
+    navigate(AUTHENTICATED_HOME)
   }
 
   const resetData = async () => {
     resetDemoDatabase()
     await queryClient.invalidateQueries()
-    navigate('/app/projects')
+    navigate(AUTHENTICATED_HOME)
   }
 
   const refreshTasks = async () => {
@@ -100,8 +101,8 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
         {profile.admin && <Route path="admin/projects" element={<AdminProjectsView />} />}
         <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} isAdmin={profile.admin} />} />
         <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} />} />
-        <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} /> : <Navigate to="/app/projects" replace />} />
-        <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} /> : <Navigate to="/app/projects" replace />} />
+        <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
+        <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route index element={<Navigate to="projects" replace />} />
         <Route path="*" element={<Navigate to="projects" replace />} />
       </Routes>

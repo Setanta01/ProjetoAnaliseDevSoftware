@@ -10,11 +10,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Skeleton } from '@/components/ui/skeleton'
 import { DemoWorkspace } from '@/demo/DemoWorkspace'
 import { demoProfiles } from '@/demo/data'
 import MfaChallenge from '@/auth/MfaChallenge'
 import { FirstAdminSetupPage, InviteActivationPage } from '@/auth/RegistrationPages'
 import type { MfaTipo } from '@/hooks/useMFA'
+import { AUTHENTICATED_HOME, getSessionRestoreDestination } from '@/lib/auth-routing'
 import { getErrorMessage } from '@/lib/errors'
 import { isDemoMode } from '@/lib/env'
 import type { Cargo, UserProfile } from '@/types'
@@ -196,21 +198,25 @@ export default function App() {
 
   const handleAuthenticated = useCallback((nextProfile: UserProfile) => {
     setProfile(nextProfile)
-    navigate('/app', { replace: true })
+    navigate(AUTHENTICATED_HOME, { replace: true })
   }, [navigate])
 
   useEffect(() => {
     if (isDemoMode) return
     if (!localStorage.getItem('access_token')) return
     api.get<UserProfile>('/auth/profile/').then((response) => response.data)
-      .then(handleAuthenticated)
+      .then((restoredProfile) => {
+        setProfile(restoredProfile)
+        const destination = getSessionRestoreDestination(window.location.pathname)
+        if (destination) navigate(destination, { replace: true })
+      })
       .catch(() => {
         localStorage.removeItem('access_token')
         localStorage.removeItem('refresh_token')
         navigate('/login', { replace: true })
       })
       .finally(() => setCheckingSession(false))
-  }, [handleAuthenticated, navigate])
+  }, [navigate])
 
   const handleLogout = async () => {
     const refresh = localStorage.getItem('refresh_token')
@@ -229,11 +235,24 @@ export default function App() {
     const demoProfile = demoProfiles.DEV
     localStorage.setItem('lazuli_demo_role', demoProfile.cargo)
     setProfile(demoProfile)
-    navigate('/app/projects', { replace: true })
+    navigate(AUTHENTICATED_HOME, { replace: true })
   }
 
   if (checkingSession || (!isDemoMode && bootstrapQuery.isLoading)) {
-    return <div className="auth-background min-h-screen" />
+    return (
+      <main className="auth-background flex min-h-screen items-center justify-center p-4" aria-label="Carregando aplicação" aria-busy="true">
+        <Card className="w-full max-w-md shadow-md">
+          <CardHeader className="items-center space-y-5 p-8 pb-4">
+            <BrandMark />
+            <CardTitle className="sr-only">Carregando Lazuli</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 p-8 pt-4">
+            <Skeleton className="mx-auto h-4 w-2/3" />
+            <Skeleton className="mx-auto h-4 w-1/2" />
+          </CardContent>
+        </Card>
+      </main>
+    )
   }
 
   if (!isDemoMode && bootstrapQuery.isError) {
@@ -252,7 +271,7 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={needsInitialAdmin ? <Navigate to="/setup-admin" replace /> : profile ? <Navigate to={isDemoMode ? '/app/projects' : '/app'} replace /> : <AuthPage onAuthenticated={handleAuthenticated} onEnterDemo={enterDemo} />} />
+      <Route path="/login" element={needsInitialAdmin ? <Navigate to="/setup-admin" replace /> : profile ? <Navigate to={AUTHENTICATED_HOME} replace /> : <AuthPage onAuthenticated={handleAuthenticated} onEnterDemo={enterDemo} />} />
       <Route path="/setup-admin" element={(isDemoMode || needsInitialAdmin) ? <FirstAdminSetupPage onComplete={async () => { await bootstrapQuery.refetch(); navigate('/login', { replace: true }) }} /> : <Navigate to="/login" replace />} />
       <Route path="/activate-invite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
       <Route path="/ativar-convite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
@@ -270,7 +289,7 @@ export default function App() {
       ) : (
         <Route path="/app/*" element={profile ? <DemoWorkspace initialProfile={profile} onProfileChange={(nextProfile) => setProfile(nextProfile)} onExit={() => void handleLogout()} demoMode={false} /> : <Navigate to="/login" replace />} />
       )}
-      <Route path="*" element={<Navigate to={needsInitialAdmin ? '/setup-admin' : profile ? (isDemoMode ? '/app/projects' : '/app') : '/login'} replace />} />
+      <Route path="*" element={<Navigate to={needsInitialAdmin ? '/setup-admin' : profile ? AUTHENTICATED_HOME : '/login'} replace />} />
     </Routes>
   )
 }
