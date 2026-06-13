@@ -174,15 +174,19 @@ python manage.py shell -c "from api.models import Usuario; print({'total': Usuar
 
 ## Reset to First Boot
 
-This deletes application data. Use it only for local testing:
+The database volume is local to each developer and is not shared through Git.
+Only the initial SQL schema is tracked. To delete all local application data,
+reset sequences, and preserve the schema and `django_migrations`, run:
 
 ```bash
-podman rm -f lazuli-postgres
-podman volume rm lazuli-postgres-data
+cd backend
+source .venv/bin/activate
+python manage.py wipe_db_state0 --dry-run
+python manage.py wipe_db_state0
 ```
 
-Then recreate the database container and import
-`backend/api/migrations/sql/initial_schema.sql` before starting Django.
+This restores the first-boot state, so the frontend will request creation of a
+new initial administrator. Use it only for disposable local data.
 
 ## Email Smoke Tests
 
@@ -194,7 +198,7 @@ After creating the first administrator:
 4. Confirm the email arrives and opens the local activation route.
 5. Activate the user and test password login.
 6. Enable email MFA and confirm OTP delivery.
-7. Test password recovery after the corresponding frontend screens exist.
+7. Test password recovery through the existing recovery and reset screens.
 
 Automated tests verify queueing, retries, escaping, and multipart rendering.
 These smoke tests verify the real Gmail SMTP credentials and generated URLs.

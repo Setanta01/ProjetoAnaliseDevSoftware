@@ -148,9 +148,11 @@ backend; no browser-test framework was added solely for this narrow fix.
 - [x] Frontend submits email/password to the canonical login endpoint.
 - [x] Frontend loads the canonical authenticated profile.
 - [x] Access-token refresh and single retry are implemented.
-- [~] Integration-test successful and invalid login against PostgreSQL. (SKIPPED)
-- [~] Integration-test inactive users and expired/revoked refresh tokens. (SKIPPED)
-  > **Note**: Comprehensive integration tests have been deliberately skipped to avoid strongly coupling tests with the application code. This reduces cognitive debt and prevents the codebase from becoming overly complex for a project of this scale. Manual verification is sufficient.
+- [x] Verify successful login manually against PostgreSQL and keep focused,
+  disposable tests for valid credentials, invalid credentials, missing fields,
+  inactive-account disclosure behavior, and the email-MFA branch.
+- [ ] Verify expired/revoked refresh-token edge cases later. This work is
+  intentionally deferred and should not grow into a broad test framework.
 - [x] Verify session restoration after a browser refresh.
 - [x] Decide and implement the actual behavior of "Manter conectado", or remove
   the inactive control if it is outside the documented scope.
@@ -220,8 +222,8 @@ backend; no browser-test framework was added solely for this narrow fix.
 
 ## Phase 6: Tests and Acceptance
 
-- [~] Keep focused unit tests for queue creation, template rendering, retries,
-  and provider errors. (SKIPPED)
+- [x] Keep focused unit tests for queue creation, template rendering, retries,
+  provider errors, and the small login contract surface.
 - [~] Add database-backed integration tests for the complete account flows rather
   than relying only on mocked model managers. (SKIPPED)
 - [~] Test that business endpoints remain successful when email sending fails
@@ -229,7 +231,7 @@ backend; no browser-test framework was added solely for this narrow fix.
 - [~] Test that a failed invitation email can be retried successfully. (SKIPPED)
 - [x] Perform one real Gmail SMTP smoke test for invitation, password recovery,
   and email MFA.
-- [~] Run backend tests. (SKIPPED)
+- [x] Run backend tests. The 25 focused tests passed on June 13, 2026.
 - [x] Run frontend TypeScript checking.
 - [x] Run frontend lint.
 - [x] Run frontend production build.
