@@ -37,8 +37,6 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard }: BoardView
   })
 
   if (!sprintId) return <div className="p-8 text-center text-muted-foreground">Selecione uma sprint ativa.</div>
-  if (isLoading) return <LoadingState label="Carregando quadro..." />
-
   const sortedTasks = [...tasks].sort((a, b) => {
     const priorityDifference = priorityWeight[b.prioridade] - priorityWeight[a.prioridade]
     return priorityDifference || new Date(b.criado_em ?? 0).getTime() - new Date(a.criado_em ?? 0).getTime()
@@ -55,7 +53,9 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard }: BoardView
         <div><div className="mb-1 flex items-center gap-3"><Badge variant="info">Sprint Ativa</Badge><span className="text-sm text-muted-foreground">Termina em 4 dias</span></div><h1 className="text-3xl font-bold tracking-tight text-foreground">Quadro da Sprint 5</h1></div>
         <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button><Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button></div>
       </header>
-      {viewMode === 'kanban' ? (
+      {isLoading ? (
+        <LoadingState label="Carregando quadro..." />
+      ) : viewMode === 'kanban' ? (
         <div className="flex flex-1 gap-6 overflow-x-auto pb-6">
           {columns.map((column) => {
             const columnTasks = sortedTasks.filter((task) => task.status === column.status)

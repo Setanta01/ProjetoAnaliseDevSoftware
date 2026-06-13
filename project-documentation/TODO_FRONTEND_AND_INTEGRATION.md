@@ -2,15 +2,15 @@
 
 ## Highest Priority
 
-- [ ] Add a backend first-boot status/bootstrap endpoint with an atomic guarantee
+- [x] Add a backend first-boot status/bootstrap endpoint with an atomic guarantee
   that only the first administrator can be created.
-- [ ] Replace frontend `VITE_FIRST_BOOT` authority with the backend bootstrap
-  status. Keep the environment variable only as an explicit development aid.
-- [ ] Resolve the conflict between invitation-only registration and the current
-  Google OAuth contract that creates a user on first access.
+- [x] Replace frontend `VITE_FIRST_BOOT` authority with the backend bootstrap
+  status.
+- [x] Move API email delivery to a PostgreSQL queue processed by a Django SMTP worker.
+- [x] Require a valid invitation before Google OAuth creates a new account.
 - [ ] Connect **Projetos Admin** create, edit, archive, and delete actions to the
   final backend contracts and implement double confirmation for soft deletion.
-- [ ] Verify Resend configuration and delivery for invitations, password reset,
+- [ ] Verify Gmail SMTP configuration and delivery for invitations, password reset,
   MFA email OTP, mentions, assignment, QA failure, impediments, and member removal.
 
 ## Board and Cards
@@ -31,12 +31,17 @@
 
 ## Authentication and Account Management
 
-- [ ] Wire first-administrator creation to the new backend endpoint.
-- [ ] Test invitation activation with expired, invalid, reused, and valid tokens.
-- [ ] Implement password recovery and reset pages using documented endpoints.
-- [ ] Run Google OAuth and MFA integration tests outside demo mode.
-- [ ] Add administrator invitation and user-management pages; these are distinct
-  from project role management.
+Track detailed completion status and contract blockers in
+[`AUTH_FLOW_TRACKER.md`](./AUTH_FLOW_TRACKER.md).
+
+- [x] Wire first-administrator creation to the new backend endpoint.
+- [x] Verify valid invitation activation through the real UI. Keep expired,
+  invalid, and reused-token edge cases as optional focused checks.
+- [x] Implement and manually verify password recovery and reset pages.
+- [x] Verify Google OAuth outside demo mode.
+- [ ] Verify MFA setup and login outside demo mode.
+- [x] Add the administrator invitation page. A broader user-management page can
+  remain separate from project role management.
 
 ## Visual and Responsive Review
 

@@ -6,7 +6,7 @@
 - **Source of Truth (Crucial)**: Confie estritamente nos arquivos `fluxos_de_uso.md`, `Documento de Arquitetura de Software.md`, `endpoints-resumido.md` (ou `endpoints-novo.md`) e `schema.sql`. **O documento de Histórias de Usuário pode estar desatualizado**; utilize-o apenas como contexto secundário.
 
 ## 🛠️ Tech Stack Quirks & Workflow
-- **Estratégia de Notificações**: NÃO crie componentes globais de "Sininho" na UI. Alertas críticos disparam e-mails (usando a lib **Resend** no backend). As atualizações visuais no Board Kanban operam via injeção de flags booleanas contextuais (`tem_novidade`, `novos_comentarios`) diretamente no payload dos Cards. O Frontend limpa essas flags ao abrir o card chamando `POST /api/cards/<id>/marcar-visto/`.
+- **Estratégia de Notificações**: NÃO crie componentes globais de "Sininho" na UI. Alertas críticos agendam e-mails na fila PostgreSQL do backend. As atualizações visuais no Board Kanban operam via injeção de flags booleanas contextuais (`tem_novidade`, `novos_comentarios`) diretamente no payload dos Cards. O Frontend limpa essas flags ao abrir o card chamando `POST /api/cards/<id>/marcar-visto/`.
 - **React Query e Short Polling**: O Board não utiliza WebSockets. A renderização consome a rota agregada `GET /api/sprints/<id>/` via short polling leve e otimiza interações da interface com *Optimistic Updates*. Qualquer mutação (ex: arrastar card, marcar checklist) deve executar um request `PATCH/POST` granular e invocar `invalidateQueries` para reatividade imediata.
 - **Regras de Negócio Inflexíveis**:
   - Sprints em planejamento (`PLANEJADA`) nascem **sem data de início ou fim**.
@@ -15,7 +15,7 @@
   - Votos Ocultos: No Planning Poker (`/api/cards/<id>/estimativas/`), desenvolvedores e QAs não enxergam os votos uns dos outros até que o Gerente use o endpoint de revelação.
   - Trava de QA: Apenas membros com o cargo de `QA` ou `GERENTE` no projeto podem movimentar um Card para fora da coluna de Validação/QA. O backend DEVE barrar isso ativamente.
 - **Autorização Contextual e Cargos**: A flag global `admin` dá poderes totais na plataforma, porém no fluxo principal os cargos (`GERENTE`, `DEV`, `QA`) existem estritamente dentro do escopo de um projeto (`projeto_membros`). Um usuário pode ser DEV em um projeto e GERENTE em outro. As validações nas rotas dependem desse contexto.
-- **Envio de E-mail**: Nunca utilize o SMTP/`send_mail` padrão do Django em fluxos da API, pois ele é síncrono e bloqueia o request. Utilize o SDK do `resend` (exemplo em `api/mfa_utils.py` ou via Django Signals).
+- **Envio de E-mail**: Fluxos da API apenas criam jobs em `email_fila`, usando `transaction.on_commit()` quando dependem de uma alteração no banco. O comando `python manage.py process_email_queue` entrega as mensagens fora do request através do backend SMTP do Django. Não faça chamadas SMTP diretamente nas views.
 
 ## 🚀 Common Commands
 - **Backend (Setup e Execução)**:

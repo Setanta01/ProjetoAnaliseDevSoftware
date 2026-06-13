@@ -21,7 +21,9 @@
 
 | Método | Rota                           | Perm.    | Descrição e Payload                                                                                             |
 | ------ | ------------------------------ | -------- | --------------------------------------------------------------------------------------------------------------- |
-| `POST` | `/auth/login/`                 | `[PUB]`  | **Payload:** `email`, `senha`. Retorna JWT completo. Se MFA ativo, retorna `mfa_required: true` e `token_temp`. |
+| `GET`  | `/auth/bootstrap-status/`      | `[PUB]`  | Retorna `bootstrap_disponivel=true` somente enquanto nenhuma conta existir.                                    |
+| `POST` | `/auth/bootstrap-admin/`       | `[PUB]`  | **Payload:** `nome`, `email`, `senha`, `confirmar_senha`. Cria atomicamente o primeiro administrador e fica permanentemente indisponível após a primeira conta. |
+| `POST` | `/auth/login/`                 | `[PUB]`  | **Payload:** `email`, `senha`. Retorna JWT completo. Se MFA ativo, retorna `mfa_required: true` e `mfa_token`. |
 | `POST` | `/auth/google/`                | `[PUB]`  | Autentica via Google OAuth e regista o utilizador no primeiro acesso.                                           |
 | `POST` | `/token/`                      | `[PUB]`  | Obtém par Access/Refresh Token (SimpleJWT).                                                                     |
 | `POST` | `/token/refresh/`              | `[PUB]`  | Renova o Access Token usando o Refresh Token.                                                                   |
@@ -40,7 +42,7 @@
 | `GET`  | `/mfa/status/`       | `[AUTH]` | Retorna status e tipo de MFA do utilizador logado.                  |
 | `POST` | `/mfa/challenge/`    | `[PUB]`  | **Payload:** `token_temp`, código OTP/TOTP. Devolve JWT definitivo. |
 | `POST` | `/mfa/resend-email/` | `[PUB]`  | **Payload:** `token_temp`. Reenvia código OTP para o e-mail.        |
-| `POST` | `/mfa/disable/`      | `[AUTH]` | **Payload:** `senha`. Desativa MFA do utilizador.                   |
+| `DELETE` | `/mfa/disable/`      | `[AUTH]` | **Payload:** `password`. Desativa MFA do utilizador.                   |
 | `POST` | `/mfa/setup/totp/`   | `[AUTH]` | Inicia config TOTP. Retorna `secret` e URI para QR Code.            |
 | `POST` | `/mfa/verify/totp/`  | `[AUTH]` | Confirma config TOTP com o primeiro código gerado.                  |
 | `POST` | `/mfa/setup/email/`  | `[AUTH]` | Inicia config MFA por e-mail (envia OTP).                           |
@@ -50,7 +52,8 @@
 
 | Método  | Rota                    | Perm.     | Descrição e Payload                                                  |
 | ------- | ----------------------- | --------- | -------------------------------------------------------------------- |
-| `POST`  | `/admin/convites/`      | `[ADMIN]` | **Payload:** `email`, `admin` (boolean). Gera token e envia convite. |
+| `POST`  | `/admin/convites/`      | `[ADMIN]` | **Payload:** `email`, `admin` (boolean). Gera token e agenda o convite por e-mail. |
+| `POST`  | `/admin/convites/<id>/reenviar/` | `[ADMIN]` | Agenda novamente o e-mail de um convite pendente e não expirado. |
 | `GET`   | `/admin/usuarios/`      | `[ADMIN]` | Lista utilizadores do sistema, flags admin e status.                 |
 | `PATCH` | `/admin/usuarios/<id>/` | `[ADMIN]` | Ativa/desativa utilizador ou altera flag `admin`.                    |
 | `GET`   | `/admin/stats/`         | `[ADMIN]` | Retorna métricas globais (utilizadores, projetos, cards).            |

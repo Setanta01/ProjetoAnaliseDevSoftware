@@ -4,9 +4,11 @@ import secrets
 from datetime import timedelta, datetime
 
 from django.contrib.auth import authenticate
-from django.core.mail import send_mail
+from django.contrib.auth.password_validation import validate_password
+from django.core.exceptions import ValidationError
+from django.core.validators import validate_email
 from django.conf import settings
-from django.db import IntegrityError
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q, Count
 from django.utils import timezone
 
@@ -41,6 +43,7 @@ from .models import (
 # FIX (#9): helpers de emissão de token centralizados em mfa_utils — importados
 # aqui e em views_mfa sem risco de import circular.
 from .mfa_utils import enviar_otp_email, _emitir_tokens, _resposta_mfa_pendente
+from .email_service import enfileirar_email, enviar_email
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -56,6 +59,7 @@ COLUNAS_PADRAO = [
 ]
 
 COLUNA_VALIDACAO_NOME = 'Validação/QA'
+BOOTSTRAP_ADMIN_LOCK_ID = 12648430
 
 
 def _cargo_no_projeto(user, projeto):
@@ -95,16 +99,8 @@ def _registrar_historico(card, usuario, tipo, detalhe=''):
 
 
 def _enviar_email(destinatario, assunto, corpo):
-    """Wrapper seguro para send_mail — falha silenciosa em dev."""
-    try:
-        send_mail(
-            assunto, corpo,
-            getattr(settings, 'DEFAULT_FROM_EMAIL', 'noreply@lazuli.app'),
-            [destinatario],
-            fail_silently=False,
-        )
-    except Exception:
-        pass
+    """Mantém um ponto único para os disparos existentes da API."""
+    enviar_email(destinatario, assunto, corpo)
 
 
 def _serializar_card(card, tem_novidade=False):
@@ -149,11 +145,74 @@ def _serializar_comentario(c):
 # 1. AUTENTICAÇÃO
 # ─────────────────────────────────────────────────────────────────────────────
 
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def auth_bootstrap_status(request):
+    """GET /auth/bootstrap-status/ — informa se o primeiro admin pode ser criado."""
+    return Response({'bootstrap_disponivel': not Usuario.objects.exists()})
+
+
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def auth_bootstrap_admin(request):
+    """POST /auth/bootstrap-admin/ — cria, uma única vez, o primeiro administrador."""
+    nome = request.data.get('nome', '').strip()
+    email = request.data.get('email', '').strip().lower()
+    senha = request.data.get('senha', '')
+    confirmar_senha = request.data.get('confirmar_senha', '')
+
+    if not nome or not email or not senha:
+        return Response(
+            {'detail': 'Nome, e-mail e senha são obrigatórios.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if senha != confirmar_senha:
+        return Response(
+            {'detail': 'As senhas não coincidem.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        validate_email(email)
+    except ValidationError:
+        return Response({'detail': 'Informe um endereço de e-mail válido.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        validate_password(senha)
+    except ValidationError as error:
+        return Response({'detail': ' '.join(error.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        with transaction.atomic():
+            # The transaction-level advisory lock serializes concurrent first-boot requests.
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT pg_advisory_xact_lock(%s)', [BOOTSTRAP_ADMIN_LOCK_ID])
+
+            if Usuario.objects.exists():
+                return Response(
+                    {'detail': 'O sistema já possui uma conta e não aceita novo bootstrap.'},
+                    status=status.HTTP_409_CONFLICT,
+                )
+
+            user = Usuario(nome=nome, email=email, admin=True, ativo=True)
+            user.set_password(senha)
+            user.save(force_insert=True)
+    except IntegrityError:
+        return Response(
+            {'detail': 'Não foi possível criar o primeiro administrador.'},
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    return Response(
+        {'id': user.id, 'nome': user.nome, 'email': user.email, 'admin': user.admin},
+        status=status.HTTP_201_CREATED,
+    )
+
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def auth_login(request):
     """POST /auth/login/ — email+senha → JWT ou mfa_required."""
-    email    = request.data.get('email')
+    email    = request.data.get('email', '').strip().lower()
     password = request.data.get('senha') or request.data.get('password')
 
     if not email or not password:
@@ -316,9 +375,13 @@ def auth_recuperar_senha(request):
             token=token,
             expira_em=timezone.now() + timedelta(hours=2),
         )
-        link = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/redefinir-senha?token={token}"
-        _enviar_email(email, 'Recuperação de senha — Lazuli',
-                      f'Clique no link para redefinir sua senha (válido por 2h):\n\n{link}')
+        link = f"{settings.FRONTEND_URL}/redefinir-senha?token={token}"
+        enfileirar_email(
+            email,
+            'Recuperação de senha — Lazuli',
+            'recuperacao_senha',
+            {'nome': user.nome, 'link': link, 'expiracao_horas': 2},
+        )
     except Usuario.DoesNotExist:
         pass
 
@@ -396,8 +459,12 @@ def auth_alterar_senha(request):
 
     user.set_password(nova_senha)
     user.save(update_fields=['senha_hash'])
-    _enviar_email(user.email, 'Sua senha foi alterada — Lazuli',
-                  'Sua senha foi alterada com sucesso. Se não foi você, entre em contato.')
+    enfileirar_email(
+        user.email,
+        'Sua senha foi alterada — Lazuli',
+        'senha_alterada',
+        {'nome': user.nome},
+    )
     return Response({'detail': 'Senha alterada com sucesso!'})
 
 
@@ -414,7 +481,7 @@ def _exige_admin(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def admin_convites(request):
-    """POST /admin/convites/ — gera convite e envia e-mail."""
+    """POST /admin/convites/ — gera convite e agenda o e-mail."""
     err = _exige_admin(request)
     if err:
         return err
@@ -430,7 +497,7 @@ def admin_convites(request):
 
     token = secrets.token_urlsafe(40)
     try:
-        ConviteSistema.objects.create(
+        convite = ConviteSistema.objects.create(
             email=email,
             token=token,
             admin=admin,
@@ -440,11 +507,46 @@ def admin_convites(request):
     except IntegrityError:
         return Response({'detail': 'Erro ao gerar convite. Tente novamente.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    link = f"{getattr(settings, 'FRONTEND_URL', 'http://localhost:3000')}/ativar-convite?token={token}"
-    _enviar_email(email, 'Você foi convidado para o Lazuli',
-                  f'Clique no link para ativar sua conta (válido por 24h):\n\n{link}')
+    _agendar_email_convite(convite)
 
-    return Response({'detail': f'Convite enviado para {email}.'}, status=status.HTTP_201_CREATED)
+    return Response(
+        {'detail': f'Convite criado e e-mail agendado para {email}.', 'id': convite.id},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+def _agendar_email_convite(convite):
+    link = f"{settings.FRONTEND_URL}/ativar-convite?token={convite.token}"
+    enfileirar_email(
+        convite.email,
+        'Você foi convidado para o Lazuli',
+        'convite',
+        {
+            'link': link,
+            'expiracao_horas': 24,
+            'acesso_admin': convite.admin,
+        },
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_convite_reenviar(request, convite_id):
+    """POST /admin/convites/<id>/reenviar/ — agenda novamente um convite válido."""
+    err = _exige_admin(request)
+    if err:
+        return err
+
+    try:
+        convite = ConviteSistema.objects.get(pk=convite_id, usado=False)
+    except ConviteSistema.DoesNotExist:
+        return Response({'detail': 'Convite pendente não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if convite.expira_em < timezone.now():
+        return Response({'detail': 'O convite expirou e não pode ser reenviado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    _agendar_email_convite(convite)
+    return Response({'detail': f'E-mail do convite agendado novamente para {convite.email}.'})
 
 
 @api_view(['GET'])

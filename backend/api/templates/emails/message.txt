@@ -1,0 +1,17 @@
+{% autoescape off %}Lazuli
+
+{{ email.title }}
+
+{% if email.greeting %}{{ email.greeting }}
+
+{% endif %}{{ email.message }}
+{% if email.code %}
+Código: {{ email.code }}
+{% endif %}{% if email.action_url %}
+{{ email.action_label }}: {{ email.action_url }}
+{% endif %}{% if email.detail %}
+{{ email.detail }}
+{% endif %}
+---
+Mensagem automática do Lazuli. Não responda a este e-mail.
+{% endautoescape %}

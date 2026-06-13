@@ -34,7 +34,7 @@ export default function BacklogView({ projetoId, onNewCard, onOpenCard }: Backlo
       <DataPanel className="flex flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border bg-muted p-4"><SearchField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar no backlog..." /><Button variant="outline"><Filter className="h-4 w-4" /> Filtros</Button></div>
         <div className="flex-1 overflow-x-auto">
-          {isLoading ? <LoadingState /> : filteredTasks.length === 0 ? <EmptyState message="Backlog vazio" /> : (
+          {isLoading ? <LoadingState variant="table" label="Carregando backlog..." /> : filteredTasks.length === 0 ? <EmptyState message="Backlog vazio" /> : (
             <Table>
               <TableHeader><TableRow><TableHead>ID da Task</TableHead><TableHead>Título</TableHead><TableHead>Prioridade</TableHead><TableHead>Pontos</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader>
               <TableBody>{filteredTasks.map((task) => (

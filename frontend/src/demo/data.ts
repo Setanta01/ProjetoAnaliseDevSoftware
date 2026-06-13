@@ -1,13 +1,7 @@
-import type { Cargo, ChecklistItem, Comentario, ProjectMember, Projeto, Sprint, Task } from '@/types'
+import type { Cargo, ChecklistItem, Comentario, ProjectMember, Projeto, Sprint, Task, UserProfile } from '@/types'
 
-export interface DemoProfile {
-  id: number
-  username: string
-  email: string
+export interface DemoProfile extends UserProfile {
   cargo: Cargo
-  mfa_ativo: boolean
-  mfa_tipo: 'TOTP' | 'EMAIL' | null
-  tem_google: boolean
 }
 
 export interface DemoDatabase {
@@ -21,10 +15,10 @@ export interface DemoDatabase {
 }
 
 export const demoProfiles: Record<Cargo, DemoProfile> = {
-  ADMIN: { id: 1, username: 'Ana Admin', email: 'ana.admin@lazuli.demo', cargo: 'ADMIN', mfa_ativo: true, mfa_tipo: 'TOTP', tem_google: false },
-  GERENTE: { id: 2, username: 'Marina Gerente', email: 'marina@lazuli.demo', cargo: 'GERENTE', mfa_ativo: false, mfa_tipo: null, tem_google: false },
-  DEV: { id: 3, username: 'Carlos Dev', email: 'carlos@lazuli.demo', cargo: 'DEV', mfa_ativo: false, mfa_tipo: null, tem_google: false },
-  QA: { id: 4, username: 'Maria QA', email: 'maria@lazuli.demo', cargo: 'QA', mfa_ativo: true, mfa_tipo: 'EMAIL', tem_google: false },
+  ADMIN: { id: 1, nome: 'Ana Admin', email: 'ana.admin@lazuli.demo', admin: true, cargo: 'ADMIN', mfa_ativo: true, mfa_tipo: 'TOTP', tem_google: false },
+  GERENTE: { id: 2, nome: 'Marina Gerente', email: 'marina@lazuli.demo', admin: false, cargo: 'GERENTE', mfa_ativo: false, mfa_tipo: null, tem_google: false },
+  DEV: { id: 3, nome: 'Carlos Dev', email: 'carlos@lazuli.demo', admin: false, cargo: 'DEV', mfa_ativo: false, mfa_tipo: null, tem_google: false },
+  QA: { id: 4, nome: 'Maria QA', email: 'maria@lazuli.demo', admin: false, cargo: 'QA', mfa_ativo: true, mfa_tipo: 'EMAIL', tem_google: false },
 }
 
 const projects: Projeto[] = [

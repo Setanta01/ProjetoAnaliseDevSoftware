@@ -2,9 +2,12 @@
 
 export interface UserProfile {
   id: number;
-  username: string;
+  nome: string;
   email: string;
-  cargo: Cargo;
+  admin: boolean;
+  mfa_ativo: boolean;
+  mfa_tipo: "TOTP" | "EMAIL" | null;
+  tem_google: boolean;
 }
 
 export interface Projeto {

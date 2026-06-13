@@ -15,7 +15,7 @@ export default function MyProjectsView({ onSelect }: { onSelect: (project: Proje
   return (
     <PageContainer wide className="max-w-6xl">
       <PageHeader title="Meus Projetos" subtitle="Selecione um projeto para acessar o board." />
-      {isLoading ? <LoadingState /> : projects.length === 0 ? <EmptyState message="Você ainda não participa de nenhum projeto." /> : (
+      {isLoading ? <LoadingState variant="cards" label="Carregando projetos..." /> : projects.length === 0 ? <EmptyState message="Você ainda não participa de nenhum projeto." /> : (
         <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
           {projects.map((project) => (
             <button key={project.id} className="text-left" onClick={() => onSelect(project)}>

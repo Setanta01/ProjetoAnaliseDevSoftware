@@ -22,6 +22,10 @@ urlpatterns = [
     # 1. AUTENTICAÇÃO
     # ──────────────────────────────────────────────────────────────────────────
 
+    # GET/POST de primeiro boot; o POST fica indisponível após a primeira conta.
+    path('auth/bootstrap-status/',           views.auth_bootstrap_status,    name='auth_bootstrap_status'),
+    path('auth/bootstrap-admin/',            views.auth_bootstrap_admin,     name='auth_bootstrap_admin'),
+
     # POST  /auth/login/           → email+senha; retorna JWT ou mfa_required
     #   ~  renomear custom_token_obtain → auth_login no views.py
     path('auth/login/',                     views.auth_login,               name='auth_login'),
@@ -81,6 +85,7 @@ urlpatterns = [
     # POST  /admin/convites/       → gera convite e envia e-mail
     #   ✗  criar view admin_convites
     path('admin/convites/',                 views.admin_convites,           name='admin_convites'),
+    path('admin/convites/<int:convite_id>/reenviar/', views.admin_convite_reenviar, name='admin_convite_reenviar'),
 
     # GET   /admin/usuarios/       → lista todos os usuários
     path('admin/usuarios/',                 views.admin_usuarios,           name='admin_usuarios'),

@@ -1,17 +1,19 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Columns3, FolderCog, LayoutGrid, ListTodo, RotateCcw, Users } from 'lucide-react'
+import { Archive, Columns3, FolderCog, LayoutGrid, ListTodo, RotateCcw, Users, UserPlus } from 'lucide-react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import api from '@/api'
 import { AppShell, type AppNavItem } from '@/components/app/AppShell'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Select } from '@/components/ui/select'
-import { demoProfiles, type DemoProfile } from '@/demo/data'
+import { demoProfiles } from '@/demo/data'
 import { resetDemoDatabase } from '@/demo/store'
+import { AUTHENTICATED_HOME } from '@/lib/auth-routing'
 import MfaSettingsModal from '@/auth/MfaSettingsModal'
 import CardDetailModal from '@/modals/CardDetailModal'
 import CreateCardModal from '@/modals/CreateCardModal'
+import AdminInvitationsView from '@/views/AdminInvitationsView'
 import AdminProjectsView from '@/views/AdminProjectsView'
 import BacklogView from '@/views/BacklogView'
 import BoardView from '@/views/BoardView'
@@ -19,10 +21,13 @@ import MyProjectsView from '@/views/MyProjectsView'
 import ProjectMembersView from '@/views/ProjectMembersView'
 import SprintHistoryView from '@/views/SprintHistoryView'
 import type { Cargo, Projeto, Sprint } from '@/types'
+import type { UserProfile } from '@/types'
+
+type WorkspaceProfile = UserProfile & { cargo?: Cargo }
 
 interface DemoWorkspaceProps {
-  initialProfile: DemoProfile
-  onProfileChange: (profile: DemoProfile) => void
+  initialProfile: WorkspaceProfile
+  onProfileChange: (profile: WorkspaceProfile) => void
   onExit: () => void
   demoMode?: boolean
 }
@@ -42,7 +47,10 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
 
   const globalNav: AppNavItem[] = [
     { label: 'Meus Projetos', to: '/app/projects', icon: LayoutGrid, section: 'global' },
-    ...(profile.cargo === 'ADMIN' ? [{ label: 'Projetos Admin', to: '/app/admin/projects', icon: FolderCog, section: 'global' as const }] : []),
+    ...(profile.admin ? [
+      { label: 'Projetos Admin', to: '/app/admin/projects', icon: FolderCog, section: 'global' as const },
+      { label: 'Enviar Convites', to: '/app/admin/invitations', icon: UserPlus, section: 'global' as const }
+    ] : []),
   ]
   const projectNav: AppNavItem[] = projectId ? [
     { label: 'Sprint Board', to: `/app/projects/${projectId}/board`, icon: Columns3, section: 'project' },
@@ -56,13 +64,13 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
     localStorage.setItem('lazuli_demo_role', cargo)
     setProfile(nextProfile)
     onProfileChange(nextProfile)
-    navigate('/app/projects')
+    navigate(AUTHENTICATED_HOME)
   }
 
   const resetData = async () => {
     resetDemoDatabase()
     await queryClient.invalidateQueries()
-    navigate('/app/projects')
+    navigate(AUTHENTICATED_HOME)
   }
 
   const refreshTasks = async () => {
@@ -77,7 +85,7 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
 
   return (
     <AppShell
-      user={profile}
+      user={{ username: profile.nome, email: profile.email, cargo: demoMode ? (profile.cargo ?? 'USUÁRIO') : (profile.admin ? 'ADMIN' : 'USUÁRIO'), mfa_ativo: profile.mfa_ativo }}
       navItems={[...globalNav, ...projectNav]}
       projectContext={project ? { name: project.nome, sprintName: activeSprint?.nome } : undefined}
       onMfaSettings={() => setShowMfaSettings(true)}
@@ -85,7 +93,7 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
       topbarActions={demoMode ? (
         <div className="hidden items-center gap-2 sm:flex">
           <Badge variant="planning">Modo demo</Badge>
-          <Select className="h-8 w-32 border-white/20 bg-white/10 text-white shadow-none" value={profile.cargo} onChange={(event) => changeRole(event.target.value as Cargo)} aria-label="Perfil de demonstração">
+          <Select className="h-8 w-32 border-white/20 bg-white/10 text-white shadow-none" value={profile.cargo ?? 'DEV'} onChange={(event) => changeRole(event.target.value as Cargo)} aria-label="Perfil de demonstração">
             <option className="text-foreground" value="ADMIN">Admin</option><option className="text-foreground" value="GERENTE">Gerente</option><option className="text-foreground" value="DEV">Dev</option><option className="text-foreground" value="QA">QA</option>
           </Select>
           <Button variant="ghost" size="sm" className="text-topbar-foreground hover:bg-white/10 hover:text-white" onClick={() => void resetData()}><RotateCcw className="h-4 w-4" /> Resetar</Button>
@@ -94,11 +102,12 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
     >
       <Routes>
         <Route path="projects" element={<MyProjectsView onSelect={selectProject} />} />
-        {profile.cargo === 'ADMIN' && <Route path="admin/projects" element={<AdminProjectsView />} />}
-        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} isAdmin={profile.cargo === 'ADMIN'} />} />
+        {profile.admin && <Route path="admin/projects" element={<AdminProjectsView />} />}
+        {profile.admin && <Route path="admin/invitations" element={<AdminInvitationsView />} />}
+        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} isAdmin={profile.admin} />} />
         <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} />} />
-        <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} /> : <Navigate to="/app/projects" replace />} />
-        <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} /> : <Navigate to="/app/projects" replace />} />
+        <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
+        <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route index element={<Navigate to="projects" replace />} />
         <Route path="*" element={<Navigate to="projects" replace />} />
       </Routes>

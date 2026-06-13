@@ -18,11 +18,12 @@ import base64
 from datetime import datetime, timedelta, timezone
 
 from django.conf import settings
-from django.core.mail import send_mail
 
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework_simplejwt.tokens import RefreshToken
+
+from .email_service import enfileirar_email
 
 
 # ─── EMISSÃO DE TOKENS / RESPOSTA MFA ─────────────────────────────────────────
@@ -92,22 +93,15 @@ def verificar_mfa_token(token: str) -> int | None:
 
 def enviar_otp_email(usuario) -> None:
     """
-    Gera um OTP de 6 dígitos, salva no usuário e envia por e-mail.
-    Levanta exceção se o envio falhar (deixa a view tratar).
+    Gera um OTP de 6 dígitos e agenda seu envio por e-mail.
     """
     code = usuario.gerar_otp_email()
 
-    send_mail(
-        subject='Seu código de verificação — Lazuli',
-        message=(
-            f'Olá, {usuario.nome}!\n\n'
-            f'Seu código de verificação é: {code}\n\n'
-            f'Ele expira em 10 minutos.\n\n'
-            f'Se você não solicitou este código, ignore este e-mail.'
-        ),
-        from_email=settings.DEFAULT_FROM_EMAIL,
-        recipient_list=[usuario.email],
-        fail_silently=False,
+    enfileirar_email(
+        usuario.email,
+        'Seu código de verificação — Lazuli',
+        'mfa_codigo',
+        {'nome': usuario.nome, 'codigo': code, 'expiracao_minutos': 10},
     )
 
 

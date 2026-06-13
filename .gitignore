@@ -71,6 +71,7 @@ lerna-debug.log*
 .env
 .env.*
 !.env.example
+project-documentation/LOCAL_SECRETS.md
 
 # ─────────────────────────────────────────
 #  EDITORES / IDEs

@@ -40,4 +40,4 @@ Para atender aos requisitos de notificações e atualizações de interface (com
 
 #### Serviços de Mensagem:
 
-Para o envio de e-mails de alta performance (como convites, recuperações de acesso, tokens de MFA OTP e notificações do sistema), a aplicação utiliza o SDK oficial do serviço externo **Resend** (chamadas de API diretas, substituindo o bloqueio do padrão SMTP).
+Para que convites, recuperações de acesso, tokens de MFA OTP e notificações não bloqueiem requests da API, a aplicação persiste os envios em uma fila PostgreSQL. Um processo worker separado entrega mensagens HTML e texto através do backend SMTP do Django. No ambiente previsto para o projeto, o transporte usa Gmail com senha de aplicativo, podendo ser substituído por outro servidor SMTP sem alterar os fluxos da API.

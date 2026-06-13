@@ -889,3 +889,39 @@ class NotificacaoUsuario(models.Model):
 
     def __str__(self):
         return f'Notif user={self.usuario_id} card={self.card_id} lida={self.lida}'
+
+
+# =============================================================================
+# FILA DE E-MAIL
+# =============================================================================
+
+class EmailFila(models.Model):
+    """Tabela: email_fila — entrega assíncrona processada por management command."""
+
+    STATUS_CHOICES = [
+        ('PENDING', 'Pendente'),
+        ('PROCESSING', 'Processando'),
+        ('SENT', 'Enviado'),
+        ('FAILED', 'Falhou'),
+    ]
+
+    id             = models.BigAutoField(primary_key=True)
+    destinatario   = models.CharField(max_length=254)
+    assunto        = models.CharField(max_length=255)
+    template       = models.CharField(max_length=80)
+    contexto       = models.JSONField(default=dict)
+    status         = models.CharField(max_length=16, choices=STATUS_CHOICES, default='PENDING')
+    tentativas     = models.PositiveSmallIntegerField(default=0)
+    proxima_tentativa_em = models.DateTimeField(default=timezone.now)
+    ultimo_erro    = models.TextField(blank=True, default='')
+    criado_em      = models.DateTimeField(auto_now_add=True)
+    atualizado_em  = models.DateTimeField(auto_now=True)
+    enviado_em     = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'email_fila'
+        managed = False
+        ordering = ['criado_em']
+
+    def __str__(self):
+        return f'Email {self.id} para {self.destinatario} ({self.status})'
