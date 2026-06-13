@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { GoogleLogin, GoogleOAuthProvider } from '@react-oauth/google'
 import { useQuery } from '@tanstack/react-query'
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
+import { Navigate, Route, Routes, useNavigate, Link } from 'react-router-dom'
 import api from '@/api'
 import { BrandMark } from '@/components/app/BrandMark'
 import { Alert } from '@/components/ui/alert'
@@ -15,6 +15,7 @@ import { DemoWorkspace } from '@/demo/DemoWorkspace'
 import { demoProfiles } from '@/demo/data'
 import MfaChallenge from '@/auth/MfaChallenge'
 import { FirstAdminSetupPage, InviteActivationPage } from '@/auth/RegistrationPages'
+import { PasswordRecoveryRequestPage, PasswordResetPage } from '@/auth/PasswordRecoveryPages'
 import type { MfaTipo } from '@/hooks/useMFA'
 import { AUTHENTICATED_HOME, getSessionRestoreDestination } from '@/lib/auth-routing'
 import { getErrorMessage } from '@/lib/errors'
@@ -143,7 +144,7 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
             >
               <div className="space-y-2"><Label htmlFor="login-email">E-mail</Label><Input id="login-email" className="h-12" placeholder="exemplo@email.com" type="email" value={form.email} onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))} /></div>
               <div className="space-y-2"><Label htmlFor="login-password">Senha</Label><Input id="login-password" className="h-12" placeholder="••••••••" type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} /></div>
-              <div className="flex items-center justify-between text-sm"><label className="flex items-center gap-2"><Checkbox /> Manter conectado</label><button type="button" className="font-medium text-primary hover:underline">Esqueceu a senha?</button></div>
+              <div className="flex items-center justify-end text-sm"><Link to="/recuperar-senha" className="font-medium text-primary hover:underline">Esqueceu a senha?</Link></div>
               <Button type="submit" className="w-full" disabled={loading}>
                 {loading ? 'Aguarde...' : 'Entrar'}
               </Button>
@@ -275,6 +276,8 @@ export default function App() {
       <Route path="/setup-admin" element={(isDemoMode || needsInitialAdmin) ? <FirstAdminSetupPage onComplete={async () => { await bootstrapQuery.refetch(); navigate('/login', { replace: true }) }} /> : <Navigate to="/login" replace />} />
       <Route path="/activate-invite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
       <Route path="/ativar-convite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
+      <Route path="/recuperar-senha" element={<PasswordRecoveryRequestPage />} />
+      <Route path="/redefinir-senha" element={<PasswordResetPage />} />
       {isDemoMode ? (
         <Route
           path="/app/*"
