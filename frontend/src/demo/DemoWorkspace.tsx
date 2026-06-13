@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Archive, Columns3, FolderCog, LayoutGrid, ListTodo, RotateCcw, Users } from 'lucide-react'
+import { Archive, Columns3, FolderCog, LayoutGrid, ListTodo, RotateCcw, Users, UserPlus } from 'lucide-react'
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import api from '@/api'
 import { AppShell, type AppNavItem } from '@/components/app/AppShell'
@@ -13,6 +13,7 @@ import { AUTHENTICATED_HOME } from '@/lib/auth-routing'
 import MfaSettingsModal from '@/auth/MfaSettingsModal'
 import CardDetailModal from '@/modals/CardDetailModal'
 import CreateCardModal from '@/modals/CreateCardModal'
+import AdminInvitationsView from '@/views/AdminInvitationsView'
 import AdminProjectsView from '@/views/AdminProjectsView'
 import BacklogView from '@/views/BacklogView'
 import BoardView from '@/views/BoardView'
@@ -46,7 +47,10 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
 
   const globalNav: AppNavItem[] = [
     { label: 'Meus Projetos', to: '/app/projects', icon: LayoutGrid, section: 'global' },
-    ...(profile.admin ? [{ label: 'Projetos Admin', to: '/app/admin/projects', icon: FolderCog, section: 'global' as const }] : []),
+    ...(profile.admin ? [
+      { label: 'Projetos Admin', to: '/app/admin/projects', icon: FolderCog, section: 'global' as const },
+      { label: 'Enviar Convites', to: '/app/admin/invitations', icon: UserPlus, section: 'global' as const }
+    ] : []),
   ]
   const projectNav: AppNavItem[] = projectId ? [
     { label: 'Sprint Board', to: `/app/projects/${projectId}/board`, icon: Columns3, section: 'project' },
@@ -99,6 +103,7 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
       <Routes>
         <Route path="projects" element={<MyProjectsView onSelect={selectProject} />} />
         {profile.admin && <Route path="admin/projects" element={<AdminProjectsView />} />}
+        {profile.admin && <Route path="admin/invitations" element={<AdminInvitationsView />} />}
         <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} isAdmin={profile.admin} />} />
         <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} />} />
         <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
