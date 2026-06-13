@@ -93,6 +93,18 @@ All three quality commands passed at the end of this implementation pass.
 * Added automated coverage for the Resend payload, missing configuration, MFA
   delivery, invitation failure cleanup, and first-administrator bootstrap.
 
+## Asynchronous Email Stabilization - 2026-06-12
+
+* Replaced synchronous Resend calls with a PostgreSQL-backed `email_fila`.
+* Added a small Django worker with row locking, stale-job recovery, and at most
+  three delivery attempts.
+* Restored provider-independent Django SMTP configuration for Gmail app-password
+  use without adding Redis, Celery, or another runtime service.
+* Added shared responsive HTML and plain-text presentation for invitations,
+  recovery, MFA, password changes, and existing card/project notifications.
+* Preserved invitations when delivery fails and added an endpoint to schedule a
+  valid pending invitation again.
+
 ## Known Visual Differences
 
 * Some font metrics and spacing differ slightly from the raster prototype.

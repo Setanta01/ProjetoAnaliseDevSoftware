@@ -52,7 +52,8 @@
 
 | Método  | Rota                    | Perm.     | Descrição e Payload                                                  |
 | ------- | ----------------------- | --------- | -------------------------------------------------------------------- |
-| `POST`  | `/admin/convites/`      | `[ADMIN]` | **Payload:** `email`, `admin` (boolean). Gera token e envia convite. |
+| `POST`  | `/admin/convites/`      | `[ADMIN]` | **Payload:** `email`, `admin` (boolean). Gera token e agenda o convite por e-mail. |
+| `POST`  | `/admin/convites/<id>/reenviar/` | `[ADMIN]` | Agenda novamente o e-mail de um convite pendente e não expirado. |
 | `GET`   | `/admin/usuarios/`      | `[ADMIN]` | Lista utilizadores do sistema, flags admin e status.                 |
 | `PATCH` | `/admin/usuarios/<id>/` | `[ADMIN]` | Ativa/desativa utilizador ou altera flag `admin`.                    |
 | `GET`   | `/admin/stats/`         | `[ADMIN]` | Retorna métricas globais (utilizadores, projetos, cards).            |

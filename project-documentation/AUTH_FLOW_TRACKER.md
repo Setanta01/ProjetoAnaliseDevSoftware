@@ -32,7 +32,7 @@ alone does not make a flow complete.
 | Invited user activates account | Activation form submits the documented token and password fields, then returns to login. | `/api/auth/ativar-convite/` activates or creates the invited account and consumes the token. | **Partial** | Add real-backend integration tests and decide whether a dedicated success confirmation should precede the login redirect. |
 | Password recovery request | Login contains an inactive “forgot password” control. | `/api/auth/recuperar-senha/` creates a token and sends a recovery link. | **Missing** | Add the recovery-request route and form, connect the login link, and verify neutral responses that do not reveal whether an account exists. |
 | Password reset from email | No reset route or form exists. | `/api/auth/redefinir-senha/` accepts a token and new password. | **Missing** | Add `/redefinir-senha`, password confirmation and validation, token error states, and success redirect. Confirm `FRONTEND_URL` generates the correct frontend URL. |
-| Invitation and recovery email delivery | Frontend displays generic recovery states and reports invitation delivery failures. | Invitation, recovery, MFA OTP, and other API email calls use the shared Resend SDK service. Failed invitation delivery removes the pending invitation so it can be retried. | **Partial** | Smoke-test real delivery to an allowed recipient and verify received invitation links, recovery links, and MFA codes. |
+| Invitation and recovery email delivery | Frontend displays generic recovery states; invitation administration is still missing. | Invitation, recovery, MFA OTP, and other API email calls create PostgreSQL queue jobs. A Django worker delivers styled text/HTML messages through SMTP and retries failures up to three times. | **Partial** | Configure the Gmail account/app password and smoke-test invitation, recovery, and MFA delivery to a real inbox. |
 | Route protection | `/app/*` redirects users without an in-memory profile to login. | JWT authentication protects API endpoints. | **Partial** | Complete profile restoration and token refresh. Verify expired/revoked token behavior and role-based access for admin routes. |
 
 ## Blocking Contract Corrections
@@ -51,7 +51,7 @@ These corrections should be completed before broader authentication testing:
    logout, first-admin bootstrap, and invitation activation.
 2. Complete invitation administration.
 3. Add password recovery and reset screens.
-4. Configure and test Google OAuth, MFA, and Resend in a real environment.
+4. Configure and test Google OAuth, MFA, and Gmail SMTP in a real environment.
 5. Add integration tests covering success, invalid input, expiration, reuse,
    inactive accounts, and authorization failures.
 

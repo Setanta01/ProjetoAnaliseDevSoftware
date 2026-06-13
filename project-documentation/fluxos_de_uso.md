@@ -4,7 +4,7 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 
 ---
 
-> **Notificações e E-mails (Intenção Técnica):** O sistema não possui um "sininho" global na interface de usuário (UI). Alertas críticos (atribuições diretas, falhas de validação de QA, e-mails do sistema de convite e recuperação) disparam e-mails rapidamente via API da biblioteca **Resend**. Para manter a comunicação fluida no board e de forma contextualizada, o payload principal da Sprint injetará flags dinâmicas (`tem_novidade`, `novos_comentarios`) indicando atualizações não lidas no escopo daquele Card desde a última vez que o usuário visualizou.
+> **Notificações e E-mails (Intenção Técnica):** O sistema não possui um "sininho" global na interface de usuário (UI). Alertas críticos (atribuições diretas, falhas de validação de QA, convites e recuperação) são persistidos em uma fila PostgreSQL e entregues por um worker SMTP, sem bloquear requests da API. Para manter a comunicação fluida no board e de forma contextualizada, o payload principal da Sprint injetará flags dinâmicas (`tem_novidade`, `novos_comentarios`) indicando atualizações não lidas no escopo daquele Card desde a última vez que o usuário visualizou.
 
 ## 1. Fluxo de Convite, Autenticação e Segurança
 
@@ -16,7 +16,7 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 
 ### Cenário 1: Entrada no Sistema
 1. O **Administrador** acessa o painel de usuários e envia um convite (`POST /api/admin/convites/`) inserindo o e-mail de um novo colaborador.
-2. O colaborador recebe um e-mail com um token único (enviado via Resend). Ao acessar o link, ele define sua senha (`POST /api/auth/ativar-convite/`). O sistema cria o registro na tabela `usuarios` e invalida o convite.
+2. O colaborador recebe um e-mail com um token único, entregue pelo worker SMTP. Ao acessar o link, ele define sua senha (`POST /api/auth/ativar-convite/`). O sistema cria o registro na tabela `usuarios` e invalida o convite.
 3. Se o administrador tiver marcado a flag `admin=true` no convite, esse usuário terá privilégios globais em toda a aplicação.
 
 ### Cenário 2: Login com MFA (Multi-Factor Authentication)

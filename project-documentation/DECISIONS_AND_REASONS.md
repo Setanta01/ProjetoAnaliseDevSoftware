@@ -103,6 +103,15 @@ the same presentation components to work with demo and real API adapters.
 **Reason:** Notifications are contextual card flags and critical emails in the
 canonical architecture. A bell would introduce an undocumented product flow.
 
+### PostgreSQL queue with Gmail SMTP
+
+**Decision:** Persist outbound email jobs in PostgreSQL and deliver them with a
+small Django management command using Gmail SMTP.
+
+**Reason:** Provider calls must not block API requests. PostgreSQL is already a
+required service, so a small queue table avoids adding Redis and Celery for the
+project's expected volume. SMTP remains replaceable through Django settings.
+
 ### Demo mode cannot be enabled in production builds
 
 **Reason:** Local fixtures and mock authentication must not become a production

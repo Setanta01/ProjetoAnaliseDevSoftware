@@ -6,12 +6,12 @@
   that only the first administrator can be created.
 - [x] Replace frontend `VITE_FIRST_BOOT` authority with the backend bootstrap
   status.
-- [x] Standardize API transactional email delivery on the official Resend SDK.
+- [x] Move API email delivery to a PostgreSQL queue processed by a Django SMTP worker.
 - [ ] Resolve the conflict between invitation-only registration and the current
   Google OAuth contract that creates a user on first access.
 - [ ] Connect **Projetos Admin** create, edit, archive, and delete actions to the
   final backend contracts and implement double confirmation for soft deletion.
-- [ ] Verify Resend configuration and delivery for invitations, password reset,
+- [ ] Verify Gmail SMTP configuration and delivery for invitations, password reset,
   MFA email OTP, mentions, assignment, QA failure, impediments, and member removal.
 
 ## Board and Cards

@@ -4,13 +4,13 @@ Este documento detalha os passos necessários para refatorar e adequar a aplica�
 
 ## 1. Backend (Refinamento e Mensageria)
 O backend baseado em Django REST Framework (DRF) será mantido, junto com a recém-criada implementação nativa de autenticação (Google SSO e MFA).
-- **Substituição do SMTP pelo Resend SDK: [✅ CONCLUÍDO]**
-  - SDK do Resend configurado e `api/mfa_utils.py` refatorado para utilizá-lo garantindo operações mais rápidas e sem bloqueio longo.
+- **Fila assíncrona de e-mail com SMTP: [✅ CONCLUÍDO]**
+  - A API persiste jobs em `email_fila`, e o comando `process_email_queue` entrega as mensagens pelo backend SMTP do Django sem bloquear os requests.
 - **Estruturação de Models e Views (Próximos Passos):**
   - Garantir que todos os models previstos em `schema.sql` estejam fielmente refletidos no `models.py`.
   - Desenvolver os serializers e as views estritamente baseadas no contrato do arquivo `endpoints-novo.md`.
 - **Preparar para Notificações (Próximos Passos):**
-  - Implementar _Django Signals_ (ou lógica no `.save()`) para disparar e-mails via Resend nas operações críticas: atribuição de card, menções em comentários, falhas na validação de QA, criação de impedimentos, e deleção de membros do projeto.
+  - Utilizar o serviço de fila compartilhado nas operações críticas: atribuição de card, menções em comentários, falhas na validação de QA, criação de impedimentos e remoção de membros do projeto.
   - O endpoint de leitura da Sprint (`GET /api/sprints/<id>/`) usará a tabela `notificacoes` para injetar dinamicamente as flags `tem_novidade=true` nos cards, mantendo a comunicação em tempo real no Board do frontend.
 
 ## 2. Frontend (Scrap & Rebuild)

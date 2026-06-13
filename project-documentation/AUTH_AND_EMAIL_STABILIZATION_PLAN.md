@@ -22,7 +22,7 @@ committed. A flow is not complete merely because its screen or endpoint exists.
 - [x] Keep email delivery outside HTTP request handling through a lightweight
   background worker.
 - [x] Keep secrets only in ignored local environment files.
-- [ ] Update canonical documentation that currently mandates Resend so it
+- [x] Update canonical documentation that currently mandates Resend so it
   describes asynchronous provider-independent email delivery.
 
 ## Phase 1: Protect and Organize Git History
@@ -49,70 +49,72 @@ committed. A flow is not complete merely because its screen or endpoint exists.
 
 ### Queue and Worker
 
-- [ ] Add a small PostgreSQL-backed email queue model/table with, at minimum:
+- [x] Add a small PostgreSQL-backed email queue model/table with, at minimum:
   recipient, subject, template identifier, template data, status, attempt count,
   next attempt time, last error, creation time, and sent time.
-- [ ] Define statuses such as `PENDING`, `PROCESSING`, `SENT`, and `FAILED`.
-- [ ] Add a service that enqueues email jobs without making a network call.
-- [ ] Enqueue jobs with `transaction.on_commit()` when they depend on a database
+- [x] Define statuses such as `PENDING`, `PROCESSING`, `SENT`, and `FAILED`.
+- [x] Add a service that enqueues email jobs without making a network call.
+- [x] Enqueue jobs with `transaction.on_commit()` when they depend on a database
   change that must commit first.
-- [ ] Add a Django management command that polls and sends pending jobs.
-- [ ] Use database row locking so two workers cannot send the same job.
-- [ ] Retry temporary failures with a small bounded policy, such as three
+- [x] Add a Django management command that polls and sends pending jobs.
+- [x] Use database row locking so two workers cannot send the same job.
+- [x] Retry temporary failures with a small bounded policy, such as three
   attempts with increasing delay.
-- [ ] Mark permanent failures for inspection without blocking or undoing the
+- [x] Mark permanent failures for inspection without blocking or undoing the
   original business operation.
-- [ ] Provide a simple command for running the worker locally alongside Django.
-- [ ] Document how the worker should be started in development and deployment.
+- [x] Provide a simple command for running the worker locally alongside Django.
+- [x] Document how the worker should be started in development and deployment.
 
 ### Gmail SMTP Configuration
 
-- [ ] Restore Django's SMTP backend configuration using environment variables:
+- [x] Restore Django's SMTP backend configuration using environment variables:
   `EMAIL_HOST`, `EMAIL_PORT`, `EMAIL_USE_TLS`, `EMAIL_HOST_USER`,
   `EMAIL_HOST_PASSWORD`, and `DEFAULT_FROM_EMAIL`.
-- [ ] Configure Gmail SMTP with port `587`, TLS, and an app password.
-- [ ] Keep the Gmail address and app password in ignored local secret files.
-- [ ] Update `.env.example` files with placeholders only.
-- [ ] Remove the Resend SDK dependency and `RESEND_API_KEY` configuration after
+- [x] Configure Gmail SMTP defaults with port `587`, TLS, and app-password
+  environment variables. Real credentials still need to be supplied locally.
+- [x] Keep the Gmail address and app password in ignored local secret files.
+- [x] Update `.env.example` files with placeholders only.
+- [x] Remove the Resend SDK dependency and `RESEND_API_KEY` configuration after
   all callers use the queue.
-- [ ] Add a worker smoke test that sends to the permitted receiving address.
+- [ ] Run the real Gmail worker smoke test after the Gmail address and app
+  password are supplied. The console and in-memory worker paths already pass.
 
 ### Correct the Existing Failure Semantics
 
-- [ ] Ensure password changes succeed independently from notification delivery.
-- [ ] Ensure comments, QA validations, impediments, member removal, and Planning
+- [x] Ensure password changes succeed independently from notification delivery.
+- [x] Ensure comments, QA validations, impediments, member removal, and Planning
   Poker operations do not return errors after their database changes succeed.
-- [ ] Retain invitations when delivery fails; record email failure and permit a
+- [x] Retain invitations when delivery fails; record email failure and permit a
   resend instead of deleting the invitation.
-- [ ] Return wording such as "convite agendado" rather than claiming immediate
+- [x] Return wording such as "convite agendado" rather than claiming immediate
   delivery before the worker sends it.
-- [ ] Add an explicit invitation resend action using the existing valid token or
+- [x] Add an explicit invitation resend action using the existing valid token or
   a clearly documented replacement-token policy.
-- [ ] Ensure email MFA handles queue/delivery timing explicitly; because an OTP
+- [x] Ensure email MFA handles queue/delivery timing explicitly; because an OTP
   is time-sensitive, verify that its expiration is measured appropriately and
   that resend invalidates or supersedes the previous code.
 
 ## Phase 3: Email Presentation
 
-- [ ] Create shared plain-text and HTML base templates.
-- [ ] Use a restrained Lazuli style: centered container, white content card,
+- [x] Create shared plain-text and HTML base templates.
+- [x] Use a restrained Lazuli style: centered container, white content card,
   primary blue header/action, readable system fonts, subtle gray border, and
   muted footer text.
-- [ ] Include the Lazuli name or existing brand mark without embedding remote
+- [x] Include the Lazuli name or existing brand mark without embedding remote
   assets that are required for understanding the message.
-- [ ] Create a reusable primary action button for invitation and recovery links.
-- [ ] Show raw fallback URLs below action buttons for clients that block HTML
+- [x] Create a reusable primary action button for invitation and recovery links.
+- [x] Show raw fallback URLs below action buttons for clients that block HTML
   links or styling.
-- [ ] Escape all user-provided content before rendering it in HTML.
-- [ ] Keep every HTML email paired with a useful plain-text alternative.
-- [ ] Add templates for:
-  - [ ] User invitation.
-  - [ ] Password recovery.
-  - [ ] Email MFA code.
-  - [ ] Password changed confirmation.
-  - [ ] Card and project notifications already emitted by the backend.
-- [ ] Include expiration information for invitation, recovery, and MFA messages.
-- [ ] Preview representative templates locally and check narrow/mobile email
+- [x] Escape all user-provided content before rendering it in HTML.
+- [x] Keep every HTML email paired with a useful plain-text alternative.
+- [x] Add templates for:
+  - [x] User invitation.
+  - [x] Password recovery.
+  - [x] Email MFA code.
+  - [x] Password changed confirmation.
+  - [x] Card and project notifications already emitted by the backend.
+- [x] Include expiration information for invitation, recovery, and MFA messages.
+- [x] Preview representative templates locally and check narrow/mobile email
   layouts.
 
 ## Phase 4: Login Route and White-Screen Stabilization

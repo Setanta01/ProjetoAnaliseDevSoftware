@@ -78,8 +78,34 @@ python manage.py migrate
 python manage.py runserver
 ```
 
-`backend/.env` provides Django, PostgreSQL, Resend, Google OAuth, and frontend
+`backend/.env` provides Django, PostgreSQL, SMTP, Google OAuth, and frontend
 URL settings. It is ignored by Git.
+
+For Gmail delivery, configure:
+
+```env
+EMAIL_BACKEND=django.core.mail.backends.smtp.EmailBackend
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USE_TLS=True
+EMAIL_HOST_USER=seu@gmail.com
+EMAIL_HOST_PASSWORD=sua_senha_de_app
+DEFAULT_FROM_EMAIL=Lazuli <seu@gmail.com>
+```
+
+Keep `django.core.mail.backends.console.EmailBackend` while developing without
+real SMTP credentials.
+
+Run the email worker in a separate terminal:
+
+```bash
+cd backend
+source .venv/bin/activate
+python manage.py process_email_queue
+```
+
+For one development pass through all currently available jobs, use
+`python manage.py process_email_queue --once`.
 
 ## Start Frontend
 
@@ -107,27 +133,30 @@ VITE_API_URL=http://localhost:8000
 5. After any user exists, bootstrap is permanently unavailable and the normal
    login page is shown.
 
-The first-administrator step does not send email. Resend is used after login
-for invitations, password recovery, email MFA, and critical notifications.
+The first-administrator step does not send email. After login, invitations,
+password recovery, email MFA, and critical notifications are written to
+`email_fila` and delivered by the SMTP worker.
 
 ## Invitation Registration
 
 1. A logged-in global administrator creates an invitation.
-2. The backend stores a one-use token and sends a Resend email containing
+2. The backend stores a one-use token and queues an email containing
    `/ativar-convite?token=...`.
 3. The invited user opens that route, validates the token, and chooses a
    password.
 4. The backend creates or activates the account and consumes the invitation.
 5. Project roles remain project-scoped and are assigned separately.
 
-If Resend rejects an invitation email, the pending invitation is deleted so
-the administrator can retry.
+If SMTP delivery fails, the invitation remains valid and the worker retries the
+email up to three times. An administrator can also schedule the same valid
+invitation again through `POST /api/admin/convites/<id>/reenviar/`.
 
 ## Login and MFA
 
 Password login calls `POST /api/auth/login/`. A normal login returns access and
 refresh JWTs. Accounts with MFA enabled receive a temporary MFA token first.
-Email MFA sends an OTP through Resend; TOTP uses the configured authenticator.
+Email MFA queues an OTP for immediate worker processing; TOTP uses the
+configured authenticator. Keep the worker running when testing email MFA.
 
 ## Check Existing Users
 
@@ -159,11 +188,13 @@ Then recreate the database container and import
 
 After creating the first administrator:
 
-1. Send an invitation to an address allowed by the current Resend account.
-2. Confirm the email arrives and opens the local activation route.
-3. Activate the user and test password login.
-4. Enable email MFA and confirm OTP delivery.
-5. Test password recovery after the corresponding frontend screens exist.
+1. Configure a Gmail address and app password in `backend/.env`.
+2. Start `python manage.py process_email_queue`.
+3. Send an invitation to a receiving address.
+4. Confirm the email arrives and opens the local activation route.
+5. Activate the user and test password login.
+6. Enable email MFA and confirm OTP delivery.
+7. Test password recovery after the corresponding frontend screens exist.
 
-Automated tests mock provider delivery. These smoke tests verify the real
-Resend credentials, sender domain, recipient policy, and generated URLs.
+Automated tests verify queueing, retries, escaping, and multipart rendering.
+These smoke tests verify the real Gmail SMTP credentials and generated URLs.

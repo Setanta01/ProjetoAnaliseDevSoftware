@@ -3,6 +3,8 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
+from django.core import mail
+from django.test import override_settings
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
@@ -10,6 +12,8 @@ from rest_framework.test import APIRequestFactory, force_authenticate
 from . import views
 from . import views_mfa
 from .email_service import enfileirar_email, enviar_email
+from .email_templates import renderizar_email
+from .management.commands.process_email_queue import process_next_email, send_queued_email
 from .mfa_utils import enviar_otp_email
 
 
@@ -57,6 +61,54 @@ class EmailServiceTests(TestCase):
             'mfa_codigo',
             {'nome': 'Usuário', 'codigo': '123456', 'expiracao_minutos': 10},
         )
+
+
+class EmailWorkerTests(TestCase):
+    def test_template_escapes_user_content_and_keeps_text_fallback(self):
+        text, html = renderizar_email(
+            'notificacao',
+            {'titulo': 'Atualização', 'mensagem': '<script>alert(1)</script>'},
+        )
+
+        self.assertIn('<script>alert(1)</script>', text)
+        self.assertNotIn('<script>alert(1)</script>', html)
+        self.assertIn('&lt;script&gt;alert(1)&lt;/script&gt;', html)
+
+    @override_settings(
+        EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend',
+        DEFAULT_FROM_EMAIL='Lazuli <lazuli@example.com>',
+    )
+    def test_worker_builds_plain_text_and_html_email(self):
+        job = SimpleNamespace(
+            destinatario='destino@example.com',
+            assunto='Convite Lazuli',
+            template='convite',
+            contexto={
+                'link': 'https://example.com/ativar?token=abc',
+                'expiracao_horas': 24,
+                'acesso_admin': False,
+            },
+        )
+
+        send_queued_email(job)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertIn('Ativar minha conta', mail.outbox[0].body)
+        self.assertEqual(mail.outbox[0].alternatives[0][1], 'text/html')
+
+    @patch('api.management.commands.process_email_queue.send_queued_email')
+    @patch('api.management.commands.process_email_queue.claim_next_email')
+    def test_worker_retries_without_raising_to_request_flow(self, claim, send):
+        job = MagicMock(tentativas=1)
+        claim.return_value = job
+        send.side_effect = RuntimeError('SMTP indisponível')
+
+        processed = process_next_email()
+
+        self.assertTrue(processed)
+        self.assertEqual(job.status, 'PENDING')
+        self.assertIn('SMTP indisponível', job.ultimo_erro)
+        job.save.assert_called_once()
 
 
 class BootstrapAdminTests(TestCase):
