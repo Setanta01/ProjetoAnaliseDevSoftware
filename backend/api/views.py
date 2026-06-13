@@ -212,7 +212,7 @@ def auth_bootstrap_admin(request):
 @permission_classes([AllowAny])
 def auth_login(request):
     """POST /auth/login/ — email+senha → JWT ou mfa_required."""
-    email    = request.data.get('email')
+    email    = request.data.get('email', '').strip().lower()
     password = request.data.get('senha') or request.data.get('password')
 
     if not email or not password:

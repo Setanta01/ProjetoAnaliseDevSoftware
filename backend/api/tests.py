@@ -229,6 +229,61 @@ class AuthFlowTests(TestCase):
             is_authenticated=True,
         )
 
+    @patch('api.views._emitir_tokens', return_value={'access': 'access-token', 'refresh': 'refresh-token'})
+    @patch('api.views.authenticate')
+    def test_login_returns_tokens_for_valid_credentials(self, authenticate, emitir_tokens):
+        user = SimpleNamespace(ativo=True, mfa_ativo=False)
+        authenticate.return_value = user
+
+        response = views.auth_login(self.factory.post(
+            '/api/auth/login/',
+            {'email': 'USER@EXAMPLE.COM', 'senha': 'SenhaForte!2026'},
+            format='json',
+        ))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'access': 'access-token', 'refresh': 'refresh-token'})
+        authenticate.assert_called_once()
+        self.assertEqual(authenticate.call_args.kwargs['email'], 'user@example.com')
+        self.assertEqual(authenticate.call_args.kwargs['password'], 'SenhaForte!2026')
+        emitir_tokens.assert_called_once_with(user)
+
+    @patch('api.views.authenticate', return_value=None)
+    def test_login_rejects_invalid_credentials(self, authenticate):
+        response = views.auth_login(self.factory.post(
+            '/api/auth/login/',
+            {'email': 'user@example.com', 'senha': 'senha-incorreta'},
+            format='json',
+        ))
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data, {'detail': 'Credenciais inválidas.'})
+        authenticate.assert_called_once()
+
+    @patch('api.views.authenticate')
+    def test_login_rejects_missing_required_fields(self, authenticate):
+        response = views.auth_login(self.factory.post(
+            '/api/auth/login/',
+            {'email': 'user@example.com'},
+            format='json',
+        ))
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data, {'detail': 'E-mail e senha são obrigatórios.'})
+        authenticate.assert_not_called()
+
+    @patch('api.views.authenticate', return_value=None)
+    def test_login_does_not_disclose_inactive_account(self, authenticate):
+        response = views.auth_login(self.factory.post(
+            '/api/auth/login/',
+            {'email': 'inactive@example.com', 'senha': 'SenhaForte!2026'},
+            format='json',
+        ))
+
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.data, {'detail': 'Credenciais inválidas.'})
+        authenticate.assert_called_once()
+
     @patch('api.views._resposta_mfa_pendente', return_value=Response({'mfa_required': True, 'mfa_tipo': 'EMAIL', 'mfa_token': 'temp-token'}))
     @patch('api.views.enviar_otp_email')
     @patch('api.views.authenticate')
