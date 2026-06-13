@@ -1,26 +1,36 @@
-import html
+from collections.abc import Mapping
 
-import resend
-from django.conf import settings
+from django.db import transaction
+
+from .models import EmailFila
 
 
-class EmailDeliveryError(RuntimeError):
-    pass
+def enfileirar_email(
+    destinatario: str,
+    assunto: str,
+    template: str,
+    contexto: Mapping[str, object],
+) -> None:
+    """Agenda a mensagem somente após a transação atual ser confirmada."""
+
+    payload = dict(contexto)
+
+    def criar_job() -> None:
+        EmailFila.objects.create(
+            destinatario=destinatario,
+            assunto=assunto,
+            template=template,
+            contexto=payload,
+        )
+
+    transaction.on_commit(criar_job)
 
 
 def enviar_email(destinatario: str, assunto: str, corpo: str) -> None:
-    api_key = settings.RESEND_API_KEY
-    if not api_key:
-        raise EmailDeliveryError('RESEND_API_KEY não configurada.')
-
-    resend.api_key = api_key
-    try:
-        resend.Emails.send({
-            'from': settings.DEFAULT_FROM_EMAIL,
-            'to': [destinatario],
-            'subject': assunto,
-            'text': corpo,
-            'html': f'<p>{html.escape(corpo).replace(chr(10), "<br>")}</p>',
-        })
-    except Exception as error:
-        raise EmailDeliveryError('O Resend não conseguiu enviar o e-mail.') from error
+    """Compatibilidade para notificações simples já existentes."""
+    enfileirar_email(
+        destinatario,
+        assunto,
+        'notificacao',
+        {'titulo': assunto, 'mensagem': corpo},
+    )

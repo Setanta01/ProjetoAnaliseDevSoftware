@@ -85,6 +85,7 @@ urlpatterns = [
     # POST  /admin/convites/       → gera convite e envia e-mail
     #   ✗  criar view admin_convites
     path('admin/convites/',                 views.admin_convites,           name='admin_convites'),
+    path('admin/convites/<int:convite_id>/reenviar/', views.admin_convite_reenviar, name='admin_convite_reenviar'),
 
     # GET   /admin/usuarios/       → lista todos os usuários
     path('admin/usuarios/',                 views.admin_usuarios,           name='admin_usuarios'),

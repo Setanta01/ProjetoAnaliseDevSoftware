@@ -3,49 +3,60 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import MagicMock, patch
 
-from django.test import override_settings
 from django.utils import timezone
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from . import views
 from . import views_mfa
-from .email_service import EmailDeliveryError, enviar_email
+from .email_service import enfileirar_email, enviar_email
 from .mfa_utils import enviar_otp_email
 
 
 class EmailServiceTests(TestCase):
-    @override_settings(
-        RESEND_API_KEY='re_test',
-        DEFAULT_FROM_EMAIL='Lazuli <noreply@notifications.lazuliagil.com>',
-    )
-    @patch('api.email_service.resend.Emails.send')
-    def test_sends_transactional_email_with_resend(self, resend_send):
+    @patch('api.email_service.EmailFila.objects.create')
+    @patch('api.email_service.transaction.on_commit')
+    def test_enqueues_email_after_commit(self, on_commit, create):
+        on_commit.side_effect = lambda callback: callback()
+
+        enfileirar_email(
+            'destino@example.com',
+            'Assunto',
+            'notificacao',
+            {'titulo': 'Assunto', 'mensagem': 'Corpo'},
+        )
+
+        create.assert_called_once_with(
+            destinatario='destino@example.com',
+            assunto='Assunto',
+            template='notificacao',
+            contexto={'titulo': 'Assunto', 'mensagem': 'Corpo'},
+        )
+
+    @patch('api.email_service.enfileirar_email')
+    def test_compatibility_email_uses_notification_template(self, enqueue):
         enviar_email('destino@example.com', 'Assunto', 'Linha 1\nLinha 2')
 
-        resend_send.assert_called_once_with({
-            'from': 'Lazuli <noreply@notifications.lazuliagil.com>',
-            'to': ['destino@example.com'],
-            'subject': 'Assunto',
-            'text': 'Linha 1\nLinha 2',
-            'html': '<p>Linha 1<br>Linha 2</p>',
-        })
+        enqueue.assert_called_once_with(
+            'destino@example.com',
+            'Assunto',
+            'notificacao',
+            {'titulo': 'Assunto', 'mensagem': 'Linha 1\nLinha 2'},
+        )
 
-    @override_settings(RESEND_API_KEY='')
-    def test_rejects_send_without_resend_api_key(self):
-        with self.assertRaisesRegex(EmailDeliveryError, 'RESEND_API_KEY'):
-            enviar_email('destino@example.com', 'Assunto', 'Corpo')
-
-    @patch('api.mfa_utils.enviar_email')
-    def test_mfa_email_uses_shared_resend_service(self, send):
+    @patch('api.mfa_utils.enfileirar_email')
+    def test_mfa_email_uses_queue(self, enqueue):
         user = MagicMock(nome='Usuário', email='user@example.com')
         user.gerar_otp_email.return_value = '123456'
 
         enviar_otp_email(user)
 
-        send.assert_called_once()
-        self.assertEqual(send.call_args.args[0], 'user@example.com')
-        self.assertIn('123456', send.call_args.args[2])
+        enqueue.assert_called_once_with(
+            'user@example.com',
+            'Seu código de verificação — Lazuli',
+            'mfa_codigo',
+            {'nome': 'Usuário', 'codigo': '123456', 'expiracao_minutos': 10},
+        )
 
 
 class BootstrapAdminTests(TestCase):
@@ -183,11 +194,12 @@ class AuthFlowTests(TestCase):
         enviar_otp.assert_called_once()
         resposta_mfa.assert_called_once()
 
-    @patch('api.views._enviar_email')
+    @patch('api.views._agendar_email_convite')
     @patch('api.views.secrets.token_urlsafe', return_value='convite-token')
     @patch('api.views.ConviteSistema')
-    def test_admin_can_create_invitation_and_send_email(self, convite_model, token_urlsafe, enviar_email):
+    def test_admin_can_create_invitation_and_queue_email(self, convite_model, token_urlsafe, schedule_email):
         convite_model.objects.filter.return_value.exists.return_value = False
+        convite_model.objects.create.return_value.id = 8
         request = self.factory.post(
             '/api/admin/convites/',
             {'email': 'Novo@Example.com', 'admin': False},
@@ -199,30 +211,28 @@ class AuthFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 201)
         convite_model.objects.create.assert_called_once()
-        enviar_email.assert_called_once()
-        args = enviar_email.call_args.args
-        self.assertEqual(args[0], 'novo@example.com')
-        self.assertIn('/ativar-convite?token=convite-token', args[2])
+        schedule_email.assert_called_once_with(convite_model.objects.create.return_value)
+        self.assertEqual(response.data['id'], 8)
+        self.assertIn('agendado', response.data['detail'])
         token_urlsafe.assert_called_once_with(40)
 
-    @patch('api.views._enviar_email', side_effect=EmailDeliveryError('falha'))
-    @patch('api.views.secrets.token_urlsafe', return_value='convite-token')
+    @patch('api.views._agendar_email_convite')
     @patch('api.views.ConviteSistema')
-    def test_failed_invitation_delivery_removes_pending_invite(self, convite_model, token_urlsafe, enviar_email):
-        convite_model.objects.filter.return_value.exists.return_value = False
-        convite = convite_model.objects.create.return_value
-        request = self.factory.post(
-            '/api/admin/convites/',
-            {'email': 'novo@example.com', 'admin': False},
-            format='json',
+    def test_admin_can_resend_valid_pending_invitation(self, convite_model, schedule_email):
+        convite = MagicMock(
+            email='novo@example.com',
+            usado=False,
+            expira_em=timezone.now() + timedelta(hours=1),
         )
+        convite_model.objects.get.return_value = convite
+        request = self.factory.post('/api/admin/convites/7/reenviar/', {}, format='json')
         force_authenticate(request, user=self.admin_user)
 
-        response = views.admin_convites(request)
+        response = views.admin_convite_reenviar(request, 7)
 
-        self.assertEqual(response.status_code, 502)
-        self.assertEqual(response.data, {'detail': 'Não foi possível enviar o convite por e-mail.'})
-        convite.delete.assert_called_once_with()
+        self.assertEqual(response.status_code, 200)
+        schedule_email.assert_called_once_with(convite)
+        convite.delete.assert_not_called()
 
     @patch('api.views.Usuario')
     @patch('api.views.ConviteSistema')
@@ -243,12 +253,12 @@ class AuthFlowTests(TestCase):
         existing_user.save.assert_called_once_with(update_fields=['admin', 'ativo', 'senha_hash', 'convidado_por'])
         convite.save.assert_called_once_with(update_fields=['usado'])
 
-    @patch('api.views._enviar_email')
+    @patch('api.views.enfileirar_email')
     @patch('api.views.RecuperacaoSenha')
     @patch('api.views.secrets.token_urlsafe', return_value='reset-token')
     @patch('api.views.Usuario')
-    def test_password_recovery_creates_token_and_sends_email(self, usuario_model, token_urlsafe, recuperacao_model, enviar_email):
-        user = MagicMock(email='user@example.com')
+    def test_password_recovery_creates_token_and_queues_email(self, usuario_model, token_urlsafe, recuperacao_model, enqueue):
+        user = MagicMock(email='user@example.com', nome='Usuário')
         usuario_model.objects.get.return_value = user
 
         response = views.auth_recuperar_senha(self.factory.post(
@@ -259,8 +269,9 @@ class AuthFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         recuperacao_model.objects.create.assert_called_once()
-        enviar_email.assert_called_once()
-        self.assertIn('/redefinir-senha?token=reset-token', enviar_email.call_args.args[2])
+        enqueue.assert_called_once()
+        self.assertEqual(enqueue.call_args.args[2], 'recuperacao_senha')
+        self.assertIn('/redefinir-senha?token=reset-token', enqueue.call_args.args[3]['link'])
         token_urlsafe.assert_called_once_with(40)
 
     @patch('api.views.Usuario.objects.get', side_effect=views.Usuario.DoesNotExist)

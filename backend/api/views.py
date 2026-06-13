@@ -43,7 +43,7 @@ from .models import (
 # FIX (#9): helpers de emissão de token centralizados em mfa_utils — importados
 # aqui e em views_mfa sem risco de import circular.
 from .mfa_utils import enviar_otp_email, _emitir_tokens, _resposta_mfa_pendente
-from .email_service import EmailDeliveryError, enviar_email
+from .email_service import enfileirar_email, enviar_email
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -376,11 +376,12 @@ def auth_recuperar_senha(request):
             expira_em=timezone.now() + timedelta(hours=2),
         )
         link = f"{settings.FRONTEND_URL}/redefinir-senha?token={token}"
-        try:
-            _enviar_email(email, 'Recuperação de senha — Lazuli',
-                          f'Clique no link para redefinir sua senha (válido por 2h):\n\n{link}')
-        except EmailDeliveryError:
-            pass
+        enfileirar_email(
+            email,
+            'Recuperação de senha — Lazuli',
+            'recuperacao_senha',
+            {'nome': user.nome, 'link': link, 'expiracao_horas': 2},
+        )
     except Usuario.DoesNotExist:
         pass
 
@@ -458,8 +459,12 @@ def auth_alterar_senha(request):
 
     user.set_password(nova_senha)
     user.save(update_fields=['senha_hash'])
-    _enviar_email(user.email, 'Sua senha foi alterada — Lazuli',
-                  'Sua senha foi alterada com sucesso. Se não foi você, entre em contato.')
+    enfileirar_email(
+        user.email,
+        'Sua senha foi alterada — Lazuli',
+        'senha_alterada',
+        {'nome': user.nome},
+    )
     return Response({'detail': 'Senha alterada com sucesso!'})
 
 
@@ -476,7 +481,7 @@ def _exige_admin(request):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def admin_convites(request):
-    """POST /admin/convites/ — gera convite e envia e-mail."""
+    """POST /admin/convites/ — gera convite e agenda o e-mail."""
     err = _exige_admin(request)
     if err:
         return err
@@ -502,18 +507,46 @@ def admin_convites(request):
     except IntegrityError:
         return Response({'detail': 'Erro ao gerar convite. Tente novamente.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    link = f"{settings.FRONTEND_URL}/ativar-convite?token={token}"
-    try:
-        _enviar_email(email, 'Você foi convidado para o Lazuli',
-                      f'Clique no link para ativar sua conta (válido por 24h):\n\n{link}')
-    except EmailDeliveryError:
-        convite.delete()
-        return Response(
-            {'detail': 'Não foi possível enviar o convite por e-mail.'},
-            status=status.HTTP_502_BAD_GATEWAY,
-        )
+    _agendar_email_convite(convite)
 
-    return Response({'detail': f'Convite enviado para {email}.'}, status=status.HTTP_201_CREATED)
+    return Response(
+        {'detail': f'Convite criado e e-mail agendado para {email}.', 'id': convite.id},
+        status=status.HTTP_201_CREATED,
+    )
+
+
+def _agendar_email_convite(convite):
+    link = f"{settings.FRONTEND_URL}/ativar-convite?token={convite.token}"
+    enfileirar_email(
+        convite.email,
+        'Você foi convidado para o Lazuli',
+        'convite',
+        {
+            'link': link,
+            'expiracao_horas': 24,
+            'acesso_admin': convite.admin,
+        },
+    )
+
+
+@api_view(['POST'])
+@permission_classes([IsAuthenticated])
+def admin_convite_reenviar(request, convite_id):
+    """POST /admin/convites/<id>/reenviar/ — agenda novamente um convite válido."""
+    err = _exige_admin(request)
+    if err:
+        return err
+
+    try:
+        convite = ConviteSistema.objects.get(pk=convite_id, usado=False)
+    except ConviteSistema.DoesNotExist:
+        return Response({'detail': 'Convite pendente não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if convite.expira_em < timezone.now():
+        return Response({'detail': 'O convite expirou e não pode ser reenviado.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    _agendar_email_convite(convite)
+    return Response({'detail': f'E-mail do convite agendado novamente para {convite.email}.'})
 
 
 @api_view(['GET'])
