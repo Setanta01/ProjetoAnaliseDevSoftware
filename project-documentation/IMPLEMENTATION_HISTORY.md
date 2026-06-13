@@ -68,7 +68,8 @@ prototype behavior.
 * Restyled the login screen to follow the prototype without separate admin and
   user login buttons.
 * Added first-administrator setup and invited-user activation screens.
-* Added `VITE_FIRST_BOOT` as a temporary frontend development switch.
+* Initially added `VITE_FIRST_BOOT` as a temporary frontend development switch;
+  it was later replaced by the backend bootstrap-status endpoint.
 * Kept Google OAuth and real email delivery outside demo mode.
 
 ## Verification Performed
@@ -81,6 +82,9 @@ prototype behavior.
 All three quality commands passed at the end of this implementation pass.
 
 ## Authentication Integration Update - 2026-06-12
+
+> Historical intermediate state: the Resend implementation below was replaced
+> later the same day by the PostgreSQL queue and SMTP worker.
 
 * Added a shared transactional-email service using the official Resend SDK.
 * Migrated invitation, password recovery, MFA OTP, and existing API email
@@ -104,6 +108,19 @@ All three quality commands passed at the end of this implementation pass.
   recovery, MFA, password changes, and existing card/project notifications.
 * Preserved invitations when delivery fails and added an endpoint to schedule a
   valid pending invitation again.
+
+## Authentication Flow Completion - 2026-06-13
+
+* Connected the administrator invitation screen, invitation activation,
+  password recovery, and password reset flows to the real backend.
+* Stabilized authenticated routing so login targets `/app/projects` directly
+  and session restoration preserves nested application routes.
+* Verified invitation activation, password login, recovery, reset, Gmail SMTP,
+  and Google OAuth through the local UI.
+* Added focused disposable login tests for valid, invalid, missing-field,
+  inactive-account disclosure, and email-MFA behavior.
+* Added `wipe_db_state0` for restoring a disposable local PostgreSQL database to
+  first boot without recreating the container or schema.
 
 ## Known Visual Differences
 

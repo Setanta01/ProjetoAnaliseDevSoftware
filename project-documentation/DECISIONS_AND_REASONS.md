@@ -62,12 +62,13 @@ be demonstration-only. Authorization is determined after authentication.
 
 ### First administrator bootstrap
 
-**Decision:** Add a first-administrator registration screen and temporary
-`VITE_FIRST_BOOT` routing support.
+**Decision:** Add a first-administrator registration screen controlled by the
+backend bootstrap-status endpoint.
 
 **Reason:** Invitation-only registration cannot begin without an initial
-administrator. The frontend switch enables design testing, but production must
-use an atomic backend check so client configuration cannot reopen bootstrap.
+administrator. The backend uses an atomic PostgreSQL check and lock so client
+configuration cannot reopen bootstrap. The earlier `VITE_FIRST_BOOT` switch was
+temporary and has been removed from production authority.
 
 ### Invitation registration
 
@@ -112,6 +113,15 @@ small Django management command using Gmail SMTP.
 required service, so a small queue table avoids adding Redis and Celery for the
 project's expected volume. SMTP remains replaceable through Django settings.
 
+### Google account creation requires an invitation
+
+**Decision:** Google OAuth may link an existing account, but a new Google user
+is created only when a valid, unused invitation exists for the returned email.
+
+**Reason:** Google authentication must not bypass the invitation-only account
+policy. The invitation determines whether the new account receives global admin
+access and is consumed after account creation.
+
 ### Demo mode cannot be enabled in production builds
 
 **Reason:** Local fixtures and mock authentication must not become a production
@@ -119,12 +129,7 @@ authentication bypass.
 
 ## Decisions Still Required
 
-1. Define and document an atomic backend endpoint for first-administrator
-   bootstrap and the response that indicates whether bootstrap is available.
-2. Decide whether Google OAuth may create accounts directly. The current API
-   description says it registers on first access, which conflicts with the
-   newer invitation-only requirement unless pre-invitation is enforced.
-3. Confirm whether administrators can edit a project directly through
+1. Confirm whether administrators can edit a project directly through
    `/projetos/<id>/` after locating it through `/admin/projetos/`.
-4. Define exact Board drag-and-drop behavior and optimistic rollback messages.
-5. Supply responsive prototype references if mobile parity is required.
+2. Define exact Board drag-and-drop behavior and optimistic rollback messages.
+3. Supply responsive prototype references if mobile parity is required.
