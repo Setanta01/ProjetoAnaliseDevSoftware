@@ -42,7 +42,7 @@
 | `GET`  | `/mfa/status/`       | `[AUTH]` | Retorna status e tipo de MFA do utilizador logado.                  |
 | `POST` | `/mfa/challenge/`    | `[PUB]`  | **Payload:** `token_temp`, código OTP/TOTP. Devolve JWT definitivo. |
 | `POST` | `/mfa/resend-email/` | `[PUB]`  | **Payload:** `token_temp`. Reenvia código OTP para o e-mail.        |
-| `POST` | `/mfa/disable/`      | `[AUTH]` | **Payload:** `senha`. Desativa MFA do utilizador.                   |
+| `DELETE` | `/mfa/disable/`      | `[AUTH]` | **Payload:** `password`. Desativa MFA do utilizador.                   |
 | `POST` | `/mfa/setup/totp/`   | `[AUTH]` | Inicia config TOTP. Retorna `secret` e URI para QR Code.            |
 | `POST` | `/mfa/verify/totp/`  | `[AUTH]` | Confirma config TOTP com o primeiro código gerado.                  |
 | `POST` | `/mfa/setup/email/`  | `[AUTH]` | Inicia config MFA por e-mail (envia OTP).                           |
