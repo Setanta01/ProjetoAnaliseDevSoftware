@@ -1,73 +1,61 @@
-# React + TypeScript + Vite
+# Lazuli Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Demo mode
 
-Currently, two official plugins are available:
+Demo mode allows the frontend to run without Django, Google OAuth, Resend, or a database.
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+Create `frontend/.env.local` with:
 
-## React Compiler
-
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
-
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```env
+VITE_DEMO_MODE=true
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Then run:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+```bash
+npm install
+npm run dev
+```
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+Open `http://localhost:5173` and use **Explorar demonstração** on the login
+page. The selected demo role and all
+demo mutations are stored in browser local storage.
+
+Available demo screens:
+
+- Login, first-admin registration, and invited-user registration
+- Member project list for Admin, Gerente, Dev, and QA
+- Separate global project administration for Admin
+- Project-scoped sprint board, backlog, members, and sprint history
+- Task creation, card details, comments, subtasks, and planning poker
+- MFA settings flow
+
+Use the role selector in the top bar to test permissions. Project-specific
+navigation is shown only after opening a project. Use **Resetar** to restore the
+original fixtures.
+
+## Real backend mode
+
+Set the local environment to:
+
+```env
+VITE_DEMO_MODE=false
+VITE_API_URL=http://localhost:8000
+VITE_GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+VITE_FIRST_BOOT=false
+```
+
+Demo mode is additionally guarded by `import.meta.env.DEV`, so production builds always use real authentication and API behavior.
+
+Set `VITE_FIRST_BOOT=true` only while the installation still needs its first
+administrator. After that account is created, the backend or deployment
+configuration must disable the first-boot route. Normal users register only
+through an administrator invitation.
+
+## Quality checks
+
+```bash
+npm run typecheck
+npm run lint
+npm run build
 ```
