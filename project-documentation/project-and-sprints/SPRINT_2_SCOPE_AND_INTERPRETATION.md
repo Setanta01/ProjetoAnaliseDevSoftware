@@ -62,11 +62,11 @@ descreve o recorte funcional priorizado pelo documento de priorizacao.
   interface deve mostrar ao gerente quem ja votou antes da decisao.
 - A escala aceita para Planning Poker e `[1, 2, 3, 5, 8, 13, 21]` e `?`.
 - Encerramento de sprint deve tratar cards pendentes explicitamente.
-- Ao encerrar uma sprint, o sistema deve exigir a definicao da proxima sprint
-  para que o trabalho possa continuar imediatamente.
-- A proxima sprint deve ser criada/configurada dentro do dialogo de
-  encerramento. Nao existe uma etapa separada de "sprint planning" nesta
-  aplicacao por enquanto.
+- Ao encerrar uma sprint, o gerente escolhe entre mover pendencias para a sprint
+  ja planejada ou pausar o projeto.
+- A proxima sprint nao e nomeada no encerramento; ela deve existir previamente
+  como `PLANEJADA`. Se o projeto for pausado, a migracao dos cards pendentes
+  ocorre quando a sprint planejada for iniciada.
 - Ao mover uma tarefa do backlog para `To do` na sprint, o formulario/fluxo deve
   abrir com os dados existentes do backlog pre-preenchidos e aguardar as
   informacoes especificas daquela sprint.
@@ -125,8 +125,8 @@ rotas `/tasks/...`, status `CONCLUIDA` no historico e fixtures normalizadas.
    `GERENTE` ou indicar outra pessoa.
 2. O projeto precisa ter ao menos um `GERENTE`.
 3. Membros adicionados a projeto devem ser usuarios existentes no sistema.
-4. Ao encerrar uma sprint, a proxima sprint deve ser configurada para iniciar
-   assim que a atual termina.
+4. Ao encerrar uma sprint, o gerente pode iniciar a sprint planejada seguinte ou
+   pausar o projeto temporariamente.
 5. Colunas padrao: `To do`, `In Progress`, `Review`, `Done`; fixas na estrutura.
 6. O termo de interface para o quadro deve ser **Board**.
 7. Somente `GERENTE` cria cards.
@@ -137,13 +137,13 @@ rotas `/tasks/...`, status `CONCLUIDA` no historico e fixtures normalizadas.
     quem votou.
 12. Escala de Planning Poker confirmada: `[1, 2, 3, 5, 8, 13, 21]` e `?`.
 13. Continua rigida a regra de no maximo uma sprint `PLANEJADA` por projeto.
-14. A proxima sprint deve ser criada/configurada dentro do dialogo de
-    encerramento da sprint atual.
+14. A proxima sprint deve ser criada antes do encerramento caso o gerente queira
+    mover pendencias imediatamente.
 15. Os nomes das colunas ficam em ingles nesta entrega. O restante da aplicacao
     continua em pt-BR.
-16. Ao preparar um backlog card para sprint, o formulario pode editar prioridade,
-    titulo, descricao, criterios de aceitacao, responsavel, deadline e
-    dificuldade/Planning Poker.
+16. Ao criar card no backlog, o formulario evita campos especificos de sprint
+    como prioridade, responsavel, deadline e dificuldade. Esses campos aparecem
+    quando o card for preparado para entrar na sprint.
 
 ## Perguntas Ainda Abertas
 

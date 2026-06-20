@@ -144,13 +144,18 @@ continue immediately after the current sprint ends.
 Requiring next-sprint context avoids leaving pending cards without a clear
 destination.
 
-### Sprint closure creates the next sprint inline
+### Sprint closure uses planned sprint or pause
 
-**Decision:** The next sprint is created/configured inside the current sprint
-closure dialog. There is no separate sprint-planning page or stage for now.
+**Decision:** Sprint closure no longer asks for the next sprint name. The
+manager either moves pending cards to an existing `PLANEJADA` sprint or closes
+the current sprint and pauses the project. When a paused project resumes by
+starting the planned sprint, pending cards from the latest closed sprint migrate
+to `To do`.
 
-**Reason:** The current product scope expects the cycle to continue immediately
-after closure without adding a new planning workflow.
+**Reason:** The user clarified that closure should not force typing a new
+sprint name. A pause path is needed for periods like collective vacations, and
+using the existing `PLANEJADA` sprint avoids adding another sprint status or a
+heavier scheduling model.
 
 ### Single planned sprint per project remains strict
 
@@ -163,9 +168,10 @@ support.
 ### Backlog card preparation for sprint
 
 **Decision:** Moving a backlog card into sprint `To do` opens the card creation
-or edit flow with existing details prefilled. The manager can review priority,
-title, description, acceptance criteria, responsible user, deadline and
-difficulty or Planning Poker.
+or edit flow with existing details prefilled. Creating a card directly in the
+backlog avoids sprint-specific fields such as priority, responsible user,
+deadline and difficulty. Those fields are reviewed when the card enters a
+sprint.
 
 **Reason:** A backlog card can already contain useful product details, but
 entering a sprint is the point where execution-specific fields may need

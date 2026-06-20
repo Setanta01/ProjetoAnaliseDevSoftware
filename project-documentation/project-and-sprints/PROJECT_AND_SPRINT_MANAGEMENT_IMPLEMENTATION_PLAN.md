@@ -49,8 +49,9 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [x] Criar card no backlog ou na sprint usando `/api/projetos/<id>/cards/`.
 - [~] Ao mover backlog para sprint, abrir fluxo com dados do backlog
   pre-preenchidos e solicitar apenas campos especificos da sprint.
-- [x] Permitir revisar prioridade, titulo, descricao, criterios de aceitacao,
-  responsavel, deadline e dificuldade/Planning Poker nesse fluxo.
+- [x] Criacao no backlog limitada a dados independentes da sprint; prioridade,
+  responsavel, deadline e dificuldade/Planning Poker ficam para cards em sprint.
+- [x] Permitir marcar card de sprint como aguardando Planning Poker na criacao.
 - [x] Corrigir divergencias de status: usar `ENCERRADA`, nao `CONCLUIDA`, se o
   backend mantiver o enum atual.
 
@@ -87,8 +88,11 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 
 - [x] Criar tela/dialogo simples para encerrar sprint ativa.
 - [x] Listar cards nao concluidos e exigir destino: backlog ou proxima sprint.
-- [x] Criar/configurar a proxima sprint dentro do dialogo de encerramento.
-- [x] Chamar `/api/sprints/<id>/encerrar/` com `proxima_sprint_nome`,
+- [x] Usar sprint ja `PLANEJADA` ao encerrar; nao pedir nome de sprint no
+  encerramento.
+- [x] Permitir encerrar e pausar o projeto, deixando migracao de pendencias para
+  quando a sprint planejada for iniciada.
+- [x] Chamar `/api/sprints/<id>/encerrar/` com `acao`, `proxima_sprint_id`,
   `cards_para_backlog` e `cards_para_sprint`.
 - [x] Atualizar historico e redirecionar para a sprint/projeto correto apos
   encerramento.
@@ -131,10 +135,12 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - `GET /api/projetos/<id>/sprints/`: retorna planejada, ativa e encerradas.
 - `POST /api/projetos/<id>/sprints/`: cria sprint `PLANEJADA` com `nome`.
 - O projeto continua limitado a no maximo uma sprint `PLANEJADA`.
-- `POST /api/sprints/<id>/iniciar/`: muda `PLANEJADA` para `ATIVA`.
+- `POST /api/sprints/<id>/iniciar/`: muda `PLANEJADA` para `ATIVA` e, se o
+  projeto estava pausado, migra pendencias da ultima sprint encerrada para
+  `To do`.
 - `GET /api/sprints/<id>/`: retorna sprint agregada com colunas, cards e flags.
-- `POST /api/sprints/<id>/encerrar/`: encerra, cria/inicia a proxima sprint e
-  distribui pendencias.
+- `POST /api/sprints/<id>/encerrar/`: encerra e inicia uma sprint ja planejada
+  ou pausa o projeto.
 
 ### Cards
 
@@ -144,9 +150,8 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - Card pode nascer no backlog ou na coluna `To do` de uma sprint.
 - `due_date` e dificuldade/estimativa sao opcionais.
 - Dificuldade pode ser informada manualmente ou definida pelo Planning Poker.
-- Ao mover do backlog para sprint, o fluxo usa dados pre-preenchidos e permite
-  revisar prioridade, titulo, descricao, criterios de aceitacao, responsavel,
-  deadline e dificuldade/Planning Poker.
+- Criacao no backlog nao mostra prioridade, responsavel, deadline ou
+  dificuldade. Esses campos sao especificos da entrada/execucao em sprint.
 - `GET /api/cards/<id>/`: detalhe completo.
 - `PATCH /api/cards/<id>/`: edita campos, `coluna_id`, `responsavel_id` e
   `due_date` quando aplicavel.

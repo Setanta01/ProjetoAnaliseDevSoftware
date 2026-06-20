@@ -38,7 +38,7 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
   const location = useLocation()
   const [profile, setProfile] = useState(initialProfile)
   const [showMfaSettings, setShowMfaSettings] = useState(false)
-  const [showCreateCard, setShowCreateCard] = useState(false)
+  const [createCardTarget, setCreateCardTarget] = useState<'backlog' | 'sprint' | null>(null)
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null)
   const projectId = Number(location.pathname.match(/\/app\/projects\/(\d+)/)?.[1]) || null
   const { data: project } = useQuery({ queryKey: ['project', projectId], queryFn: () => api.get<Projeto>(`/projetos/${projectId}/`).then((response) => response.data), enabled: Boolean(projectId) })
@@ -104,15 +104,15 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
         <Route path="projects" element={<MyProjectsView onSelect={selectProject} />} />
         {profile.admin && <Route path="admin/projects" element={<AdminProjectsView />} />}
         {profile.admin && <Route path="admin/invitations" element={<AdminInvitationsView />} />}
-        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} isAdmin={profile.admin} />} />
-        <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setShowCreateCard(true)} />} />
+        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('sprint')} isAdmin={profile.admin} />} />
+        <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('backlog')} />} />
         <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route index element={<Navigate to="projects" replace />} />
         <Route path="*" element={<Navigate to="projects" replace />} />
       </Routes>
 
-      {showCreateCard && projectId && <CreateCardModal projetoId={projectId} sprintId={activeSprint?.id} onClose={() => setShowCreateCard(false)} onSuccess={() => void refreshTasks()} />}
+      {createCardTarget && projectId && <CreateCardModal projetoId={projectId} sprintId={createCardTarget === 'sprint' ? activeSprint?.id : undefined} mode={createCardTarget} onClose={() => setCreateCardTarget(null)} onSuccess={() => void refreshTasks()} />}
       <CardDetailModal cardId={selectedCardId} onClose={() => { setSelectedCardId(null); void refreshTasks() }} />
       <MfaSettingsModal open={showMfaSettings} onOpenChange={setShowMfaSettings} onStatusChange={(active, type) => { const nextProfile = { ...profile, mfa_ativo: active, mfa_tipo: type }; setProfile(nextProfile); onProfileChange(nextProfile) }} />
     </AppShell>

@@ -1069,10 +1069,27 @@ def sprint_iniciar(request, sprint_id):
     if sprint.status != 'PLANEJADA':
         return Response({'detail': f'Sprint com status "{sprint.status}" não pode ser iniciada.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    coluna_inicial = _coluna_inicial(sprint.projeto)
+    if coluna_inicial is None:
+        return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        sprint.status      = 'ATIVA'
-        sprint.data_inicio = timezone.now().date()
-        sprint.save(update_fields=['status', 'data_inicio'])
+        with transaction.atomic():
+            sprint.status      = 'ATIVA'
+            sprint.data_inicio = timezone.now().date()
+            sprint.save(update_fields=['status', 'data_inicio'])
+
+            sprint_anterior = (
+                Sprint.objects.filter(projeto=sprint.projeto, status='ENCERRADA')
+                .exclude(pk=sprint.pk)
+                .order_by('-data_fim', '-encerrada_em', '-id')
+                .first()
+            )
+            if sprint_anterior:
+                Card.objects.filter(sprint=sprint_anterior, coluna__e_final=False).update(
+                    sprint=sprint,
+                    coluna=coluna_inicial,
+                )
     except IntegrityError:
         return Response(
             {'detail': 'Já existe uma sprint ativa neste projeto.'},
@@ -1178,17 +1195,19 @@ def sprint_encerrar(request, sprint_id):
     if sprint.status != 'ATIVA':
         return Response({'detail': 'Apenas sprints ATIVAS podem ser encerradas.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    proxima_sprint_nome = request.data.get('proxima_sprint_nome', '').strip()
+    acao = request.data.get('acao', 'iniciar_planejada')
+    proxima_sprint_id = request.data.get('proxima_sprint_id')
     cards_para_backlog = request.data.get('cards_para_backlog', [])
     cards_para_sprint  = request.data.get('cards_para_sprint', [])
 
-    if not proxima_sprint_nome:
-        return Response({'detail': 'proxima_sprint_nome é obrigatório ao encerrar a sprint.'}, status=status.HTTP_400_BAD_REQUEST)
+    if acao not in ('iniciar_planejada', 'pausar'):
+        return Response({'detail': 'acao deve ser iniciar_planejada ou pausar.'}, status=status.HTTP_400_BAD_REQUEST)
 
     coluna_inicial = _coluna_inicial(projeto)
     if coluna_inicial is None:
         return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    proxima = None
     with transaction.atomic():
         try:
             sprint.status       = 'ENCERRADA'
@@ -1196,23 +1215,26 @@ def sprint_encerrar(request, sprint_id):
             sprint.encerrada_em = timezone.now()
             sprint.save(update_fields=['status', 'data_fim', 'encerrada_em'])
 
-            proxima = Sprint.objects.create(
-                projeto=projeto,
-                nome=proxima_sprint_nome,
-                status='ATIVA',
-                data_inicio=timezone.now().date(),
-                criado_por=request.user,
-            )
+            if acao == 'iniciar_planejada':
+                if proxima_sprint_id:
+                    proxima = Sprint.objects.get(pk=proxima_sprint_id, projeto=projeto, status='PLANEJADA')
+                else:
+                    proxima = Sprint.objects.get(projeto=projeto, status='PLANEJADA')
+                proxima.status = 'ATIVA'
+                proxima.data_inicio = timezone.now().date()
+                proxima.save(update_fields=['status', 'data_inicio'])
         except IntegrityError:
             return Response(
-                {'detail': 'Não foi possível criar a próxima sprint. Verifique se já existe uma sprint ativa ou planejada.'},
+                {'detail': 'Não foi possível iniciar a sprint planejada. Verifique se já existe uma sprint ativa.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except Sprint.DoesNotExist:
+            return Response({'detail': 'Crie uma sprint planejada antes de encerrar e iniciar a próxima.'}, status=status.HTTP_400_BAD_REQUEST)
 
         if cards_para_backlog:
             Card.objects.filter(pk__in=cards_para_backlog, sprint=sprint).update(sprint=None)
 
-        if cards_para_sprint:
+        if cards_para_sprint and proxima:
             Card.objects.filter(pk__in=cards_para_sprint, sprint=sprint).update(
                 sprint=proxima,
                 coluna=coluna_inicial,
@@ -1227,7 +1249,7 @@ def sprint_encerrar(request, sprint_id):
             'nome': proxima.nome,
             'status': proxima.status,
             'data_inicio': proxima.data_inicio,
-        },
+        } if proxima else None,
     })
 
 
@@ -1261,6 +1283,7 @@ def projeto_cards(request, projeto_id):
     descricao      = request.data.get('descricao', '')
     criterios_aceitacao = request.data.get('criterios_aceitacao')
     estimativa_consolidada = request.data.get('estimativa_consolidada')
+    pronto_para_estimativa = bool(request.data.get('pronto_para_estimativa', False))
 
     if prioridade not in ('BAIXA', 'MEDIA', 'ALTA', 'URGENTE'):
         return Response({'detail': 'prioridade deve ser BAIXA, MEDIA, ALTA ou URGENTE.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1282,6 +1305,8 @@ def projeto_cards(request, projeto_id):
         card_kwargs['criterios_aceitacao'] = criterios_aceitacao
     if estimativa_consolidada not in (None, ''):
         card_kwargs['estimativa_consolidada'] = estimativa_consolidada
+    if pronto_para_estimativa:
+        card_kwargs['pronto_para_estimativa'] = True
 
     if sprint_id:
         try:

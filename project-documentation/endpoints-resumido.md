@@ -82,9 +82,9 @@
 | `GET`  | `/projetos/<id>/backlog/` | `[MEMBRO]` | Lista cards sem sprint, ordenados por prioridade.                                                            |
 | `GET`  | `/projetos/<id>/sprints/` | `[MEMBRO]` | Lista histórico, ativa e planeada do projeto.                                                                |
 | `POST` | `/projetos/<id>/sprints/` | `[GER]`    | **Payload:** `nome`. Cria sprint planeada (máx 1 ativa e 1 planeada).                                        |
-| `POST` | `/sprints/<id>/iniciar/`  | `[GER]`    | Inicia sprint (status → ATIVA).                                                                              |
+| `POST` | `/sprints/<id>/iniciar/`  | `[GER]`    | Inicia sprint (status → ATIVA). Se houver cards pendentes na última sprint encerrada do projeto, eles migram para `To do`. |
 | `GET`  | `/sprints/<id>/`          | `[MEMBRO]` | Retorna árvore completa da sprint (cards, checklists, comentários, flags).                                   |
-| `POST` | `/sprints/<id>/encerrar/` | `[GER]`    | **Payload:** `proxima_sprint_nome`, `cards_para_backlog`, `cards_para_sprint`. Encerra a sprint, cria/inicia a próxima e distribui pendências. |
+| `POST` | `/sprints/<id>/encerrar/` | `[GER]`    | **Payload:** `acao` (`iniciar_planejada` ou `pausar`), `proxima_sprint_id`, `cards_para_backlog`, `cards_para_sprint`. Encerra a sprint e inicia a planejada ou pausa o projeto. |
 
 ## 6. Cards (Tarefas e Bugs)
 
@@ -92,7 +92,7 @@
 
 | Método   | Rota                        | Perm.      | Descrição e Payload                                                                                                                                                               |
 | -------- | --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST`   | `/projetos/<id>/cards/`     | `[GER]`    | **Payload:** `titulo`, `tipo` (TAREFA/BUG), `prioridade`, `sprint_id`, `responsavel_id`, `due_date`, `criterios_aceitacao`, `estimativa_consolidada`. Se BUG, aceita `passos_reproducao`, `resultado_esperado` e `card_origem_id`. |
+| `POST`   | `/projetos/<id>/cards/`     | `[GER]`    | **Payload:** `titulo`, `tipo` (TAREFA/BUG), `sprint_id`, `prioridade`, `responsavel_id`, `due_date`, `criterios_aceitacao`, `estimativa_consolidada`, `pronto_para_estimativa`. No backlog, usar apenas dados independentes da sprint. Se BUG, aceita `passos_reproducao`, `resultado_esperado` e `card_origem_id`. |
 | `GET`    | `/cards/`                   | `[MEMBRO]` | Lista geral de cards. Aceita query param `?responsavel=me` para filtrar próprias tarefas.                                                                                         |
 | `GET`    | `/cards/<id>/`              | `[MEMBRO]` | Detalhes completos do card.                                                                                                                                                       |
 | `PATCH`  | `/cards/<id>/`              | `[MEMBRO]` | Atualiza campos, move `coluna_id` ou altera responsável. **Nota:** Alterar `due_date` ativo exige `justificativa_prazo`.                                                          |

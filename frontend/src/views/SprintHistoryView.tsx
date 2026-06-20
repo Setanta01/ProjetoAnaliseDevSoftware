@@ -61,7 +61,7 @@ export default function SprintHistoryView({ projectId }: { projectId: number }) 
         )}
       </DataPanel>
       <CreateSprintDialog projectId={projectId} open={createOpen} onOpenChange={setCreateOpen} onDone={() => void refresh()} />
-      <CloseSprintDialog sprint={activeSprint ?? null} open={closeOpen} onOpenChange={setCloseOpen} onDone={() => void refresh()} />
+      <CloseSprintDialog sprint={activeSprint ?? null} plannedSprint={plannedSprint ?? null} open={closeOpen} onOpenChange={setCloseOpen} onDone={() => void refresh()} />
     </PageContainer>
   )
 }
@@ -94,27 +94,25 @@ function CreateSprintDialog({ projectId, open, onOpenChange, onDone }: { project
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Nova Sprint</DialogTitle><DialogDescription>Crie uma sprint planejada sem datas.</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={(event) => void submit(event)}>{error && <Alert variant="destructive">{error}</Alert>}<div className="space-y-2"><Label htmlFor="sprint-name">Nome *</Label><Input id="sprint-name" value={nome} onChange={(event) => setNome(event.target.value)} placeholder="Ex: Sprint 2" /></div><DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={loading}>{loading ? 'Criando...' : 'Criar'}</Button></DialogFooter></form></DialogContent></Dialog>
 }
 
-function CloseSprintDialog({ sprint, open, onOpenChange, onDone }: { sprint: Sprint | null; open: boolean; onOpenChange: (open: boolean) => void; onDone: () => void }) {
-  const [nextName, setNextName] = useState('')
+function CloseSprintDialog({ sprint, plannedSprint, open, onOpenChange, onDone }: { sprint: Sprint | null; plannedSprint: Sprint | null; open: boolean; onOpenChange: (open: boolean) => void; onDone: () => void }) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const { data: detail } = useQuery({ queryKey: ['board', sprint?.id], queryFn: () => api.get<SprintDetail>(`/sprints/${sprint?.id}/`).then((response) => response.data), enabled: open && Boolean(sprint) })
   const pendingCards = (detail?.cards ?? []).filter((card) => card.status !== 'CONCLUIDO')
   const doneCards = (detail?.cards ?? []).filter((card) => card.status === 'CONCLUIDO')
 
-  const submit = async (event: React.FormEvent) => {
-    event.preventDefault()
+  const closeSprint = async (action: 'iniciar_planejada' | 'pausar') => {
     if (!sprint) return
-    if (!nextName.trim()) return setError('Nome da próxima sprint é obrigatório.')
+    if (action === 'iniciar_planejada' && !plannedSprint) return setError('Crie uma sprint planejada antes de mover pendências.')
     setLoading(true)
     setError('')
     try {
       await api.post(`/sprints/${sprint.id}/encerrar/`, {
-        proxima_sprint_nome: nextName.trim(),
+        acao: action,
+        proxima_sprint_id: action === 'iniciar_planejada' ? plannedSprint?.id : undefined,
         cards_para_backlog: [],
-        cards_para_sprint: pendingCards.map((card) => card.id),
+        cards_para_sprint: action === 'iniciar_planejada' ? pendingCards.map((card) => card.id) : [],
       })
-      setNextName('')
       onDone()
       onOpenChange(false)
     } catch (caughtError) {
@@ -125,5 +123,5 @@ function CloseSprintDialog({ sprint, open, onOpenChange, onDone }: { sprint: Spr
   }
 
   if (!sprint) return null
-  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Encerrar Sprint</DialogTitle><DialogDescription>As tarefas não concluídas serão movidas para a próxima sprint em To do.</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={(event) => void submit(event)}>{error && <Alert variant="destructive">{error}</Alert>}<div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">{pendingCards.length} cards pendentes irão para a próxima sprint. {doneCards.length} cards concluídos permanecem no histórico.</div><div className="space-y-2"><Label htmlFor="next-sprint-name">Próxima sprint *</Label><Input id="next-sprint-name" value={nextName} onChange={(event) => setNextName(event.target.value)} placeholder="Ex: Sprint 3" /></div><DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button><Button disabled={loading}>{loading ? 'Encerrando...' : 'Encerrar e iniciar próxima'}</Button></DialogFooter></form></DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent><DialogHeader><DialogTitle>Encerrar Sprint</DialogTitle><DialogDescription>Escolha se as pendências entram agora na sprint planejada ou se o projeto ficará pausado.</DialogDescription></DialogHeader><div className="space-y-4">{error && <Alert variant="destructive">{error}</Alert>}<div className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground">{pendingCards.length} cards pendentes. {doneCards.length} cards concluídos permanecem no histórico.</div><div className="rounded-md border border-border p-3"><p className="text-sm font-semibold">Próxima sprint planejada</p>{plannedSprint ? <p className="mt-1 text-sm text-muted-foreground">{plannedSprint.nome}</p> : <p className="mt-1 text-sm text-destructive">Nenhuma sprint planejada criada.</p>}</div><DialogFooter className="gap-2 sm:justify-between"><Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button><div className="flex flex-col gap-2 sm:flex-row"><Button type="button" variant="secondary" disabled={loading} onClick={() => void closeSprint('pausar')}>Encerrar e pausar</Button><Button type="button" disabled={loading || !plannedSprint} onClick={() => void closeSprint('iniciar_planejada')}>{loading ? 'Encerrando...' : 'Mover para próxima sprint'}</Button></div></DialogFooter></div></DialogContent></Dialog>
 }

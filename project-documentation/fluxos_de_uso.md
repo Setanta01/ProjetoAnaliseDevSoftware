@@ -46,7 +46,7 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 ## 3. Fluxo de Planejamento (Sprints e Poker)
 
 ### Construção do Backlog
-1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`). Título, descrição, prioridade e critérios de aceitação podem ser definidos nessa etapa; deadline e dificuldade são opcionais.
+1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`). Nesta etapa entram apenas dados ainda independentes da sprint, como título, descrição, tipo e critérios de aceitação. Campos de execução como prioridade, responsável, deadline e dificuldade/Planning Poker ficam para quando o card entrar em uma sprint.
 
 ### Preparação da Sprint
 1. O **Gerente** cria uma sprint (`POST /api/projetos/<id>/sprints/`). Uma regra crucial de negócio: Sprints nascem como `PLANEJADA` e **não definem data de início ou de fim** durante o planejamento. O sistema não engessa datas futuras, respeitando Sprints que sofrem readequação de tamanho antes de entrarem em vigência.
@@ -106,7 +106,8 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 1. A Sprint alcança o seu horizonte natural de encerramento prático.
 2. O **Gerente** efetiva a conclusão (`POST /api/sprints/<id>/encerrar/`).
 3. Imediatamente a API sela de maneira estática a coluna de Data Hora de Fim (`data_fim`).
-4. Porém o Ágil é mutável e as sobras ocorrem. Como não convém abandonar Cards para o limbo, a funcionalidade do endpoint abriga uma premissa obrigatória: o Payload envia o nome da próxima sprint (`proxima_sprint_nome`) e 2 arrays declarando explicitamente a "Destinação dos Órfãos".
-   - O array A conterá o ID dos cards que sofrem "regressão" e voltam ao estado frio do `Backlog`.
-   - O array B alocará o ID dos cards passados ativamente para a próxima sprint criada no encerramento.
-5. Em seguida a recém chegada `Próxima Sprint` inicia os trabalhos do Ciclo e vira `ATIVA`. O Fluxo retorna à normalidade e reinicia seu tráfego. Não há uma etapa separada de sprint planning nesta versão.
+4. Porém o Ágil é mutável e as sobras ocorrem. Como não convém abandonar Cards para o limbo, o payload escolhe `acao: "iniciar_planejada"` ou `acao: "pausar"`.
+   - Em `iniciar_planejada`, o sistema usa uma sprint já existente em `PLANEJADA`, inicia essa sprint e move os cards pendentes informados em `cards_para_sprint` para `To do`.
+   - Em `pausar`, a sprint atual é encerrada e nenhuma próxima sprint é iniciada imediatamente. Quando o projeto for retomado pelo início da sprint planejada, os cards pendentes da última sprint encerrada migram para `To do`.
+   - `cards_para_backlog` contém cards que devem voltar ao estado frio do `Backlog`.
+5. Não há digitação do nome da próxima sprint no encerramento. A próxima sprint deve ter sido criada antes como `PLANEJADA`, ou o gerente encerra e pausa o projeto.

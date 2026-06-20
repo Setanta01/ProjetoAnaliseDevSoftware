@@ -139,6 +139,19 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     if (!sprint) throw new Error('Sprint não encontrada no modo demonstração.')
     sprint.status = 'ATIVA'
     sprint.data_inicio = new Date().toISOString().slice(0, 10)
+    const previousSprint = [...database.sprints]
+      .filter((item) => item.projeto_id === sprint.projeto_id && item.status === 'ENCERRADA' && item.id !== sprint.id)
+      .sort((a, b) => String(b.data_fim ?? '').localeCompare(String(a.data_fim ?? '')))[0]
+    if (previousSprint) {
+      database.tasks.forEach((task) => {
+        if (task.sprint_id === previousSprint.id && task.status !== 'CONCLUIDO') {
+          task.sprint_id = sprint.id
+          task.status = 'TODO'
+          task.coluna_id = 1
+          task.coluna_nome = 'To do'
+        }
+      })
+    }
     saveDatabase()
     return response(config, structuredClone(sprint))
   }
@@ -146,19 +159,24 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   if (method === 'POST' && sprintCloseMatch) {
     const sprint = database.sprints.find((item) => item.id === Number(sprintCloseMatch[1]))
     if (!sprint) throw new Error('Sprint não encontrada no modo demonstração.')
-    const payload = parsePayload<{ proxima_sprint_nome: string; cards_para_sprint: number[] }>(config.data)
+    const payload = parsePayload<{ acao?: 'iniciar_planejada' | 'pausar'; proxima_sprint_id?: number; cards_para_sprint: number[] }>(config.data)
     sprint.status = 'ENCERRADA'
     sprint.data_fim = new Date().toISOString().slice(0, 10)
-    const nextSprint: Sprint = { id: nextId(database.sprints), nome: payload.proxima_sprint_nome, status: 'ATIVA', projeto_id: sprint.projeto_id, data_inicio: new Date().toISOString().slice(0, 10), criado_em: new Date().toISOString() }
-    database.sprints.push(nextSprint)
-    database.tasks.forEach((task) => {
-      if (payload.cards_para_sprint.includes(task.id)) {
-        task.sprint_id = nextSprint.id
-        task.status = 'TODO'
-        task.coluna_id = 1
-        task.coluna_nome = 'To do'
-      }
-    })
+    let nextSprint: Sprint | null = null
+    if ((payload.acao ?? 'iniciar_planejada') === 'iniciar_planejada') {
+      nextSprint = database.sprints.find((item) => item.id === payload.proxima_sprint_id && item.status === 'PLANEJADA') ?? null
+      if (!nextSprint) throw new Error('Crie uma sprint planejada antes de iniciar a próxima no modo demonstração.')
+      nextSprint.status = 'ATIVA'
+      nextSprint.data_inicio = new Date().toISOString().slice(0, 10)
+      database.tasks.forEach((task) => {
+        if (payload.cards_para_sprint.includes(task.id)) {
+          task.sprint_id = nextSprint?.id
+          task.status = 'TODO'
+          task.coluna_id = 1
+          task.coluna_nome = 'To do'
+        }
+      })
+    }
     saveDatabase()
     return response(config, { id: sprint.id, status: sprint.status, proxima_sprint: nextSprint })
   }
@@ -257,7 +275,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     const payload = parsePayload<{
       titulo: string
       descricao?: string
-      prioridade: Prioridade
+      prioridade?: Prioridade
       projeto_id?: number
       sprint_id?: number
       tipo?: Task['tipo']
@@ -265,6 +283,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       responsavel_nome?: string
       due_date?: string
       estimativa_consolidada?: number
+      pronto_para_estimativa?: boolean
       criterios_aceitacao?: string
     }>(config.data)
     const id = nextId(database.tasks)
@@ -273,7 +292,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       codigo: `ALF-${id}`,
       titulo: payload.titulo,
       descricao: payload.descricao,
-      prioridade: payload.prioridade,
+      prioridade: payload.prioridade ?? 'MEDIA',
       projeto_id: createCardMatch ? Number(createCardMatch[1]) : payload.projeto_id,
       sprint_id: payload.sprint_id,
       tipo: payload.tipo ?? 'TAREFA',
@@ -281,6 +300,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       responsavel_nome: payload.responsavel_nome,
       due_date: payload.due_date,
       estimativa_consolidada: payload.estimativa_consolidada,
+      pronto_para_estimativa: payload.pronto_para_estimativa,
       criterios_aceitacao: payload.criterios_aceitacao,
       status: payload.sprint_id ? 'TODO' : 'BACKLOG',
       criado_em: new Date().toISOString(),
