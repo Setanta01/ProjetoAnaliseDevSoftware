@@ -23,26 +23,28 @@ export default function CardDetailModal({ cardId, onClose }: CardDetailModalProp
   const [comment, setComment] = useState('')
   const [newItem, setNewItem] = useState('')
   const [showEstimate, setShowEstimate] = useState(false)
-  const { data: task, isLoading } = useQuery({ queryKey: ['task', cardId], queryFn: () => api.get<Task>(`/tasks/${cardId}/`).then((response) => response.data), enabled: Boolean(cardId) })
-  const { data: comments = [] } = useQuery({ queryKey: ['task-comments', cardId], queryFn: () => api.get<Comentario[]>(`/tasks/${cardId}/comentarios/`).then((response) => response.data), enabled: Boolean(cardId) })
-  const { data: checklist = [] } = useQuery({ queryKey: ['task-checklist', cardId], queryFn: () => api.get<ChecklistItem[]>(`/tasks/${cardId}/checklist/`).then((response) => response.data), enabled: Boolean(cardId) })
+  const { data: task, isLoading } = useQuery({ queryKey: ['task', cardId], queryFn: () => api.get<Task>(`/cards/${cardId}/`).then((response) => response.data), enabled: Boolean(cardId) })
+  const { data: comments = [] } = useQuery({ queryKey: ['task-comments', cardId], queryFn: () => api.get<ApiComment[]>(`/cards/${cardId}/comentarios/`).then((response) => response.data.map(normalizeComment)), enabled: Boolean(cardId) })
+  const { data: checklist = [] } = useQuery({ queryKey: ['task-checklist', cardId], queryFn: () => api.get<ApiChecklist[]>(`/cards/${cardId}/checklists/`).then((response) => response.data.flatMap((checklistGroup) => checklistGroup.itens.map((item) => ({ id: item.id, task_id: cardId ?? 0, titulo: item.texto, concluido: item.concluido })))), enabled: Boolean(cardId) })
 
   const addComment = async () => {
     if (!cardId || !comment.trim()) return
-    await api.post(`/tasks/${cardId}/comentarios/`, { texto: comment.trim() })
+    await api.post(`/cards/${cardId}/comentarios/`, { texto: comment.trim() })
     setComment('')
     await queryClient.invalidateQueries({ queryKey: ['task-comments', cardId] })
   }
 
   const addItem = async () => {
     if (!cardId || !newItem.trim()) return
-    await api.post(`/tasks/${cardId}/checklist/`, { titulo: newItem.trim() })
+    const checklists = await api.get<ApiChecklist[]>(`/cards/${cardId}/checklists/`).then((response) => response.data)
+    const checklistId = checklists[0]?.id ?? await api.post<ApiChecklist>(`/cards/${cardId}/checklists/`, { titulo: 'Checklist do Desenvolvedor' }).then((response) => response.data.id)
+    await api.post(`/cards/checklists/${checklistId}/itens/`, { texto: newItem.trim() })
     setNewItem('')
     await queryClient.invalidateQueries({ queryKey: ['task-checklist', cardId] })
   }
 
   const toggleItem = async (item: ChecklistItem) => {
-    await api.patch(`/tasks/checklist/${item.id}/`, { concluido: !item.concluido })
+    await api.patch(`/cards/checklists/itens/${item.id}/`, { concluido: !item.concluido })
     await queryClient.invalidateQueries({ queryKey: ['task-checklist', cardId] })
   }
 
@@ -101,5 +103,34 @@ function Checklist({ items, progress, onToggle }: { items: ChecklistItem[]; prog
 }
 
 function statusLabel(status: Task['status']) { return { BACKLOG: 'Backlog', TODO: 'A Fazer', EM_ANDAMENTO: 'Em Progresso', REVISAO: 'Revisão', CONCLUIDO: 'Concluído', BLOQUEADO: 'Bloqueado' }[status] }
-function priorityLabel(priority: Task['prioridade']) { return { BAIXA: 'Baixa', MEDIA: 'Média', ALTA: 'Alta', CRITICA: 'Crítica' }[priority] }
+function priorityLabel(priority: Task['prioridade']) { return { BAIXA: 'Baixa', MEDIA: 'Média', ALTA: 'Alta', URGENTE: 'Urgente' }[priority] }
 function formatTime(value: string) { return new Date(value).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) }
+
+interface ApiComment {
+  id: number
+  texto: string
+  usuario_id?: number
+  usuario_nome?: string
+  autor_id?: number
+  autor_nome?: string
+  criado_em: string
+  editado_em?: string
+}
+
+interface ApiChecklist {
+  id: number
+  titulo: string
+  itens: Array<{ id: number; texto: string; concluido: boolean }>
+}
+
+function normalizeComment(comment: ApiComment): Comentario {
+  return {
+    id: comment.id,
+    task_id: 0,
+    usuario_id: comment.usuario_id ?? comment.autor_id ?? 0,
+    usuario_nome: comment.usuario_nome ?? comment.autor_nome ?? 'Usuário',
+    texto: comment.texto,
+    criado_em: comment.criado_em,
+    editado_em: comment.editado_em,
+  }
+}

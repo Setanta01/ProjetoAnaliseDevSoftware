@@ -13,10 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Textarea } from '@/components/ui/textarea'
 import { getErrorMessage } from '@/lib/errors'
-import type { Projeto } from '@/types'
+import type { Projeto, Usuario } from '@/types'
 
 type ProjectDialog = { type: 'create' } | { type: 'edit'; project: Projeto } | { type: 'delete'; project: Projeto } | null
 
@@ -40,7 +41,7 @@ export default function AdminProjectsView() {
       <DataPanel className="flex-1 overflow-hidden">
         {isLoading ? <LoadingState variant="table" label="Carregando projetos..." /> : filteredProjects.length === 0 ? <EmptyState message={searchTerm ? `Nenhum projeto encontrado para "${searchTerm}"` : 'Nenhum projeto cadastrado ainda.'} /> : (
           <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Nome do Projeto</TableHead><TableHead>Membros</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader><TableBody>
-            {filteredProjects.map((project) => <TableRow key={project.id}><TableCell><span className="flex items-center gap-3 font-semibold"><span className={project.status === 'ATIVO' ? 'h-7 w-1 rounded-full bg-success' : 'h-7 w-1 rounded-full bg-border'} />{project.nome}</span></TableCell><TableCell className="text-muted-foreground">{project.member_count ?? 0}</TableCell><TableCell><span className={project.status === 'ATIVO' ? 'inline-flex rounded-full bg-success-muted px-3 py-1 text-xs font-semibold text-success-foreground' : 'inline-flex rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground'}>{project.status === 'ATIVO' ? 'Ativo' : 'Inativo'}</span></TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" onClick={() => setDialog({ type: 'edit', project })} title="Editar"><Edit2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-muted-foreground hover:bg-danger-muted hover:text-destructive" onClick={() => setDialog({ type: 'delete', project })} title="Excluir"><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}
+            {filteredProjects.map((project) => <TableRow key={project.id}><TableCell><span className="flex items-center gap-3 font-semibold"><span className={project.status === 'ATIVO' || !project.arquivado ? 'h-7 w-1 rounded-full bg-success' : 'h-7 w-1 rounded-full bg-border'} />{project.nome}</span></TableCell><TableCell className="text-muted-foreground">{project.member_count ?? project.membros ?? 0}</TableCell><TableCell><span className={project.status === 'ATIVO' || !project.arquivado ? 'inline-flex rounded-full bg-success-muted px-3 py-1 text-xs font-semibold text-success-foreground' : 'inline-flex rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground'}>{project.status === 'INATIVO' || project.arquivado ? 'Inativo' : 'Ativo'}</span></TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" onClick={() => setDialog({ type: 'edit', project })} title="Editar"><Edit2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-muted-foreground hover:bg-danger-muted hover:text-destructive" onClick={() => setDialog({ type: 'delete', project })} title="Excluir"><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}
           </TableBody></Table></div>
         )}
       </DataPanel>
@@ -54,18 +55,24 @@ function ProjectFormDialog({ dialog, onClose, onSuccess }: { dialog: Extract<Pro
   const project = dialog?.type === 'edit' ? dialog.project : null
   const [nome, setNome] = useState(project?.nome ?? '')
   const [descricao, setDescricao] = useState(project?.descricao ?? '')
+  const [gerenteId, setGerenteId] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => api.get<Usuario[]>('/usuarios/').then((response) => response.data), enabled: dialog?.type === 'create' })
+  const activeUsers = users.filter((user) => user.ativo)
 
   if (!dialog) return null
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault()
     if (!nome.trim()) return setError('Nome é obrigatório.')
+    if (!project && !gerenteId) return setError('Selecione ao menos um Gerente.')
     setLoading(true)
     setError('')
     try {
-      const payload = { nome: nome.trim(), descricao: descricao.trim() }
+      const payload = project
+        ? { nome: nome.trim(), descricao: descricao.trim() }
+        : { nome: nome.trim(), descricao: descricao.trim(), gerente_id: Number(gerenteId) }
       if (project) await api.patch(`/admin/projetos/${project.id}/`, payload)
       else await api.post('/admin/projetos/', payload)
       onSuccess()
@@ -77,7 +84,7 @@ function ProjectFormDialog({ dialog, onClose, onSuccess }: { dialog: Extract<Pro
     }
   }
 
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogContent><DialogHeader><span className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-primary"><FolderOpen className="h-5 w-5" /></span><DialogTitle>{project ? 'Editar Projeto' : 'Novo Projeto'}</DialogTitle><DialogDescription>{project ? 'Atualize os dados do projeto.' : 'Preencha os dados do projeto'}</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>{error && <Alert variant="destructive">{error}</Alert>}<div className="space-y-2"><Label htmlFor="project-name">Nome do projeto *</Label><Input id="project-name" value={nome} onChange={(event) => setNome(event.target.value)} placeholder="Ex: Sistema de Gestão" autoFocus /></div><div className="space-y-2"><Label htmlFor="project-description">Descrição <span className="font-normal text-muted-foreground">(opcional)</span></Label><Textarea id="project-description" value={descricao} onChange={(event) => setDescricao(event.target.value)} placeholder="Descreva o objetivo do projeto..." /></div><DialogFooter className="border-t border-border pt-4"><Button type="button" variant="outline" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={loading}>{loading ? (project ? 'Salvando...' : 'Criando...') : (project ? 'Salvar alterações' : 'Criar projeto')}</Button></DialogFooter></form></DialogContent></Dialog>
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}><DialogContent><DialogHeader><span className="mb-2 flex h-9 w-9 items-center justify-center rounded-lg bg-accent text-primary"><FolderOpen className="h-5 w-5" /></span><DialogTitle>{project ? 'Editar Projeto' : 'Novo Projeto'}</DialogTitle><DialogDescription>{project ? 'Atualize os dados do projeto.' : 'Preencha os dados do projeto e defina o Gerente inicial.'}</DialogDescription></DialogHeader><form className="space-y-4" onSubmit={(event) => void handleSubmit(event)}>{error && <Alert variant="destructive">{error}</Alert>}<div className="space-y-2"><Label htmlFor="project-name">Nome do projeto *</Label><Input id="project-name" value={nome} onChange={(event) => setNome(event.target.value)} placeholder="Ex: Sistema de Gestão" autoFocus /></div><div className="space-y-2"><Label htmlFor="project-description">Descrição <span className="font-normal text-muted-foreground">(opcional)</span></Label><Textarea id="project-description" value={descricao} onChange={(event) => setDescricao(event.target.value)} placeholder="Descreva o objetivo do projeto..." /></div>{!project && <div className="space-y-2"><Label htmlFor="project-manager">Gerente inicial *</Label><Select id="project-manager" value={gerenteId} onChange={(event) => setGerenteId(event.target.value)}><option value="">Selecione um usuário existente</option>{activeUsers.map((user) => <option key={user.id} value={user.id}>{user.nome} - {user.email}</option>)}</Select></div>}<DialogFooter className="border-t border-border pt-4"><Button type="button" variant="outline" onClick={onClose}>Cancelar</Button><Button type="submit" disabled={loading}>{loading ? (project ? 'Salvando...' : 'Criando...') : (project ? 'Salvar alterações' : 'Criar projeto')}</Button></DialogFooter></form></DialogContent></Dialog>
 }
 
 function DeleteProjectDialog({ project, onClose, onSuccess }: { project: Projeto | null; onClose: () => void; onSuccess: () => void }) {
@@ -89,7 +96,7 @@ function DeleteProjectDialog({ project, onClose, onSuccess }: { project: Projeto
     setLoading(true)
     setError('')
     try {
-      await api.delete(`/admin/projetos/${project.id}/`)
+      await api.delete(`/admin/projetos/${project.id}/`, { data: { confirmar: 'CONFIRMAR' } })
       onSuccess()
       onClose()
     } catch (caughtError) {

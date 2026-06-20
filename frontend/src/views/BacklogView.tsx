@@ -23,7 +23,7 @@ export default function BacklogView({ projetoId, onNewCard, onOpenCard }: Backlo
   const [search, setSearch] = useState('')
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['backlog', projetoId],
-    queryFn: () => api.get<Task[]>(`/tasks/?projeto_id=${projetoId}&status=BACKLOG`).then((response) => response.data),
+    queryFn: () => api.get<Task[]>(`/projetos/${projetoId}/backlog/`).then((response) => response.data),
     enabled: Boolean(projetoId),
   })
   const filteredTasks = tasks.filter((task) => task.titulo.toLowerCase().includes(search.toLowerCase()))

@@ -27,7 +27,7 @@ export function KanbanTaskCard({ task, onClick }: { task: Task; onClick: () => v
       {(task.tem_novidade || task.novos_comentarios) && <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"><MessageSquare className="h-3.5 w-3.5 fill-current" /></span>}
       <div className="mb-3 flex flex-wrap gap-2">
         <Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge>
-        <Badge variant={task.prioridade === 'ALTA' || task.prioridade === 'CRITICA' ? 'urgent' : task.prioridade === 'MEDIA' ? 'warning' : 'info'}>{priorityLabel(task.prioridade)}</Badge>
+        <Badge variant={task.prioridade === 'URGENTE' ? 'danger' : task.prioridade === 'ALTA' ? 'urgent' : task.prioridade === 'MEDIA' ? 'warning' : 'info'}>{priorityLabel(task.prioridade)}</Badge>
         {task.impedido && <Badge variant="danger">Bloqueado</Badge>}
         {task.aguardando_qa && <Badge variant="urgent">Aguardando QA</Badge>}
         {task.pronto_para_estimativa && !task.estimativa_consolidada && <Badge variant="planning">Planning Poker</Badge>}
@@ -48,7 +48,7 @@ export function KanbanTaskCard({ task, onClick }: { task: Task; onClick: () => v
 }
 
 function priorityLabel(priority: Task['prioridade']) {
-  return { BAIXA: 'Baixa', MEDIA: 'Média', ALTA: 'Alta', CRITICA: 'Crítica' }[priority]
+  return { BAIXA: 'Baixa', MEDIA: 'Média', ALTA: 'Alta', URGENTE: 'Urgente' }[priority]
 }
 
 function formatDueDate(value: string) {

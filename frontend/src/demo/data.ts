@@ -30,8 +30,8 @@ const projects: Projeto[] = [
 
 const sprints: Sprint[] = [
   { id: 11, nome: 'Sprint 5', status: 'ATIVA', projeto_id: 1, total_tasks: 9, concluidas: 3, progresso: 33, data_inicio: '2026-06-08', data_fim: '2026-06-15', criado_em: '2026-06-06T12:00:00Z' },
-  { id: 10, nome: 'Sprint 4', status: 'CONCLUIDA', projeto_id: 1, total_tasks: 12, concluidas: 12, progresso: 100, data_inicio: '2026-05-25', data_fim: '2026-06-05', criado_em: '2026-05-23T12:00:00Z' },
-  { id: 9, nome: 'Sprint 3', status: 'CONCLUIDA', projeto_id: 1, total_tasks: 10, concluidas: 8, progresso: 80, data_inicio: '2026-05-11', data_fim: '2026-05-22', criado_em: '2026-05-09T12:00:00Z' },
+  { id: 10, nome: 'Sprint 4', status: 'ENCERRADA', projeto_id: 1, total_tasks: 12, total_cards: 12, concluidas: 12, progresso: 100, data_inicio: '2026-05-25', data_fim: '2026-06-05', criado_em: '2026-05-23T12:00:00Z' },
+  { id: 9, nome: 'Sprint 3', status: 'ENCERRADA', projeto_id: 1, total_tasks: 10, total_cards: 10, concluidas: 8, progresso: 80, data_inicio: '2026-05-11', data_fim: '2026-05-22', criado_em: '2026-05-09T12:00:00Z' },
   { id: 21, nome: 'Sprint Portal 2', status: 'ATIVA', projeto_id: 2, total_tasks: 7, concluidas: 2, progresso: 29, data_inicio: '2026-06-08', data_fim: '2026-06-19', criado_em: '2026-06-06T12:00:00Z' },
 ]
 

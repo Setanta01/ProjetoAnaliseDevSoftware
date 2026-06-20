@@ -36,9 +36,9 @@ export default function CreateCardModal({ projetoId, sprintId, onClose, onSucces
     setError('')
     const responsible = members.find((member) => member.id === Number(form.responsavelId))
     try {
-      await api.post('/tasks/', {
+      await api.post(`/projetos/${projetoId}/cards/`, {
         titulo: form.titulo.trim(), descricao: form.descricao, prioridade: form.prioridade, tipo: form.tipo,
-        projeto_id: projetoId, sprint_id: sprintId, responsavel_id: responsible?.id, responsavel_nome: responsible?.nome,
+        sprint_id: sprintId, responsavel_id: responsible?.id,
         due_date: form.dueDate || undefined, estimativa_consolidada: form.estimate ? Number(form.estimate) : undefined,
         criterios_aceitacao: form.criterios, passos_reproducao: form.passosReproducao, resultado_esperado: form.resultadoEsperado,
       })
@@ -61,7 +61,7 @@ export default function CreateCardModal({ projetoId, sprintId, onClose, onSucces
             <Field label="Título *"><Input value={form.titulo} onChange={(event) => setForm({ ...form, titulo: event.target.value })} placeholder="Ex: Implementar tela de login" autoFocus /></Field>
             <Field label="Descrição"><Textarea className="min-h-28" value={form.descricao} onChange={(event) => setForm({ ...form, descricao: event.target.value })} placeholder="Detalhes sobre a atividade..." /></Field>
             <div className="grid gap-5 sm:grid-cols-2">
-              <Field label="Prioridade"><Select value={form.prioridade} onChange={(event) => setForm({ ...form, prioridade: event.target.value as Prioridade })}><option value="BAIXA">Baixa</option><option value="MEDIA">Média</option><option value="ALTA">Alta</option><option value="CRITICA">Crítica</option></Select></Field>
+              <Field label="Prioridade"><Select value={form.prioridade} onChange={(event) => setForm({ ...form, prioridade: event.target.value as Prioridade })}><option value="BAIXA">Baixa</option><option value="MEDIA">Média</option><option value="ALTA">Alta</option><option value="URGENTE">Urgente</option></Select></Field>
               <Field label="Tipo"><Select value={form.tipo} onChange={(event) => setForm({ ...form, tipo: event.target.value as CardType })}><option value="TAREFA">Task</option><option value="BUG">Bug</option></Select></Field>
             </div>
             <div className="grid gap-5 sm:grid-cols-3">
