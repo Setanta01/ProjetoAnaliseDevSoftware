@@ -442,6 +442,7 @@ class Card(models.Model):
     tipo        = models.CharField(max_length=10, choices=TIPO_CHOICES, default='TAREFA')
     titulo      = models.CharField(max_length=200)
     descricao   = models.TextField(blank=True, null=True)
+    criterios_aceitacao = models.TextField(blank=True, null=True)
     prioridade  = models.CharField(
         max_length=10, choices=PRIORIDADE_CHOICES, default='MEDIA'
     )
@@ -717,7 +718,7 @@ class Estimativa(models.Model):
         db_column='usuario_id',
         related_name='estimativas',
     )
-    valor         = models.IntegerField()
+    valor         = models.CharField(max_length=8)
     revelada      = models.BooleanField(default=False)
     criado_em     = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)

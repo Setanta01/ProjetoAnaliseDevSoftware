@@ -51,15 +51,15 @@ from .email_service import enfileirar_email, enviar_email
 # ─────────────────────────────────────────────────────────────────────────────
 
 COLUNAS_PADRAO = [
-    {'nome': 'Backlog',      'posicao': 1, 'e_inicial': True,  'e_final': False},
-    {'nome': 'A Fazer',      'posicao': 2, 'e_inicial': False, 'e_final': False},
-    {'nome': 'Em Progresso', 'posicao': 3, 'e_inicial': False, 'e_final': False},
-    {'nome': 'Validação/QA', 'posicao': 4, 'e_inicial': False, 'e_final': False},
-    {'nome': 'Concluído',    'posicao': 5, 'e_inicial': False, 'e_final': True},
+    {'nome': 'To do',       'posicao': 1, 'e_inicial': True,  'e_final': False},
+    {'nome': 'In Progress', 'posicao': 2, 'e_inicial': False, 'e_final': False},
+    {'nome': 'Review',      'posicao': 3, 'e_inicial': False, 'e_final': False},
+    {'nome': 'Done',        'posicao': 4, 'e_inicial': False, 'e_final': True},
 ]
 
-COLUNA_VALIDACAO_NOME = 'Validação/QA'
+COLUNA_VALIDACAO_NOME = 'Review'
 BOOTSTRAP_ADMIN_LOCK_ID = 12648430
+PLANNING_POKER_VALORES = {1, 2, 3, 5, 8, 13, 21}
 
 
 def _cargo_no_projeto(user, projeto):
@@ -103,16 +103,51 @@ def _enviar_email(destinatario, assunto, corpo):
     enviar_email(destinatario, assunto, corpo)
 
 
+def _status_card(card):
+    if card.sprint_id is None:
+        return 'BACKLOG'
+    coluna_nome = (card.coluna.nome if card.coluna else '').lower()
+    if coluna_nome == 'to do':
+        return 'TODO'
+    if coluna_nome == 'in progress':
+        return 'EM_ANDAMENTO'
+    if coluna_nome == 'review':
+        return 'REVISAO'
+    if coluna_nome == 'done' or (card.coluna and card.coluna.e_final):
+        return 'CONCLUIDO'
+    return 'ABERTO'
+
+
+def _coluna_inicial(projeto):
+    return (
+        ColunasBoard.objects.filter(projeto=projeto, e_inicial=True).first()
+        or ColunasBoard.objects.filter(projeto=projeto).order_by('posicao').first()
+    )
+
+
+def _usuario_ativo(usuario_id):
+    try:
+        return Usuario.objects.get(pk=usuario_id, ativo=True)
+    except Usuario.DoesNotExist:
+        return None
+
+
+def _eh_membro_do_projeto(usuario, projeto):
+    return ProjetoMembro.objects.filter(usuario=usuario, projeto=projeto).exists()
+
+
 def _serializar_card(card, tem_novidade=False):
     """Serializa um card. Garanta select_related('coluna') antes de chamar."""
     return {
         'id': card.id,
         'titulo': card.titulo,
         'descricao': card.descricao,
+        'criterios_aceitacao': getattr(card, 'criterios_aceitacao', None),
         'tipo': card.tipo,
         'prioridade': card.prioridade,
-        'status': card.status,
+        'status': _status_card(card),
         'coluna_id': card.coluna_id,
+        'coluna_nome': card.coluna.nome if card.coluna else None,
         'sprint_id': card.sprint_id,
         'responsavel_id': card.responsavel_id,
         'responsavel_nome': card.responsavel.nome if card.responsavel else None,
@@ -573,6 +608,17 @@ def admin_usuarios(request):
     return Response(data)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def usuarios_list(request):
+    """GET /usuarios/ — lista usuários ativos para seleção em projetos."""
+    usuarios = Usuario.objects.filter(ativo=True).order_by('nome', 'email')
+    return Response([
+        {'id': u.id, 'nome': u.nome, 'email': u.email, 'ativo': u.ativo}
+        for u in usuarios
+    ])
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def admin_usuario_detail(request, usuario_id):
@@ -641,8 +687,10 @@ def admin_projetos(request):
                 'nome':       p.nome,
                 'descricao':  p.descricao,
                 'arquivado':  p.arquivado,
+                'status':     'INATIVO' if p.arquivado else 'ATIVO',
                 'criado_em':  p.criado_em,
                 'membros':    p.num_membros,
+                'member_count': p.num_membros,
             }
             for p in projetos
         ]
@@ -650,29 +698,66 @@ def admin_projetos(request):
 
     nome      = request.data.get('nome', '').strip()
     descricao = request.data.get('descricao', '')
+    gerente_id = request.data.get('gerente_id')
     if not nome:
         return Response({'detail': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not gerente_id:
+        return Response({'detail': 'Selecione ao menos um Gerente para o projeto.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    projeto = Projeto.objects.create(nome=nome, descricao=descricao, criado_por=request.user)
-    for col in COLUNAS_PADRAO:
-        ColunasBoard.objects.create(
+    gerente = _usuario_ativo(gerente_id)
+    if gerente is None:
+        return Response({'detail': 'Gerente não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    with transaction.atomic():
+        projeto = Projeto.objects.create(nome=nome, descricao=descricao, criado_por=request.user)
+        for col in COLUNAS_PADRAO:
+            ColunasBoard.objects.create(
+                projeto=projeto,
+                nome=col['nome'],
+                posicao=col['posicao'],
+                e_inicial=col['e_inicial'],
+                e_final=col['e_final'],
+            )
+        ProjetoMembro.objects.create(
             projeto=projeto,
-            nome=col['nome'],
-            posicao=col['posicao'],
-            e_inicial=col['e_inicial'],
-            e_final=col['e_final'],
+            usuario=gerente,
+            cargo='GERENTE',
+            adicionado_por=request.user,
         )
 
     return Response({'id': projeto.id, 'nome': projeto.nome}, status=status.HTTP_201_CREATED)
 
 
-@api_view(['DELETE'])
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def admin_projeto_detail(request, projeto_id):
-    """DELETE /admin/projetos/<id>/ — soft delete com dupla confirmação."""
+    """PATCH|DELETE /admin/projetos/<id>/"""
     err = _exige_admin(request)
     if err:
         return err
+
+    try:
+        projeto = Projeto.objects.get(pk=projeto_id)
+    except Projeto.DoesNotExist:
+        return Response({'detail': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'PATCH':
+        fields = []
+        if 'nome' in request.data:
+            nome = request.data['nome'].strip()
+            if not nome:
+                return Response({'detail': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+            projeto.nome = nome
+            fields.append('nome')
+        if 'descricao' in request.data:
+            projeto.descricao = request.data['descricao']
+            fields.append('descricao')
+        if 'arquivado' in request.data:
+            projeto.arquivado = bool(request.data['arquivado'])
+            fields.append('arquivado')
+        if fields:
+            projeto.save(update_fields=fields)
+        return Response({'id': projeto.id, 'nome': projeto.nome, 'arquivado': projeto.arquivado})
 
     confirmar = request.data.get('confirmar', '').strip()
     if confirmar != 'CONFIRMAR':
@@ -680,11 +765,6 @@ def admin_projeto_detail(request, projeto_id):
             {'detail': 'Envie {"confirmar": "CONFIRMAR"} para confirmar a exclusão.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
-    try:
-        projeto = Projeto.objects.get(pk=projeto_id)
-    except Projeto.DoesNotExist:
-        return Response({'detail': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     projeto.arquivado = True
     projeto.save(update_fields=['arquivado'])
@@ -709,6 +789,8 @@ def projetos_list(request):
             'nome':      m.projeto.nome,
             'descricao': m.projeto.descricao,
             'cargo':     m.cargo,
+            'meu_cargo': m.cargo,
+            'status':    'INATIVO' if m.projeto.arquivado else 'ATIVO',
             'criado_em': m.projeto.criado_em,
         }
         for m in memberships
@@ -833,11 +915,24 @@ def projeto_membro_detail(request, projeto_id, usuario_id):
         novo_cargo = request.data.get('cargo', '').upper()
         if novo_cargo not in CARGOS_VALIDOS:
             return Response({'detail': 'Cargo inválido. Use GERENTE, DEV ou QA.'}, status=status.HTTP_400_BAD_REQUEST)
+        if membro.cargo == 'GERENTE' and novo_cargo != 'GERENTE':
+            outros_gerentes = ProjetoMembro.objects.filter(
+                projeto=projeto, cargo='GERENTE',
+            ).exclude(usuario_id=usuario_id).exists()
+            if not outros_gerentes:
+                return Response({'detail': 'O projeto deve manter ao menos um Gerente.'}, status=status.HTTP_400_BAD_REQUEST)
         membro.cargo = novo_cargo
         membro.save(update_fields=['cargo'])
         return Response({'id': usuario_id, 'cargo': membro.cargo})
 
     # DELETE
+    if membro.cargo == 'GERENTE':
+        outros_gerentes = ProjetoMembro.objects.filter(
+            projeto=projeto, cargo='GERENTE',
+        ).exclude(usuario_id=usuario_id).exists()
+        if not outros_gerentes:
+            return Response({'detail': 'O projeto deve manter ao menos um Gerente.'}, status=status.HTTP_400_BAD_REQUEST)
+
     cards_afetados = Card.objects.filter(projeto=projeto, responsavel_id=usuario_id)
     if cards_afetados.exists():
         cards_afetados.update(responsavel=None)
@@ -869,7 +964,7 @@ def projeto_colunas(request, projeto_id):
 
     colunas = ColunasBoard.objects.filter(projeto=projeto).order_by('posicao')
     return Response([
-        {'id': c.id, 'nome': c.nome, 'posicao': c.posicao}
+        {'id': c.id, 'nome': c.nome, 'posicao': c.posicao, 'e_inicial': c.e_inicial, 'e_final': c.e_final}
         for c in colunas
     ])
 
@@ -1044,11 +1139,11 @@ def sprint_detail(request, sprint_id):
         comentarios_data = [_serializar_comentario(c) for c in comentarios_ordenados]
 
         card_dict = _serializar_card(card, tem_novidade=tem_novidade)
-        card_dict['coluna_nome']   = card.coluna.nome if card.coluna else None
         card_dict['checklists']    = checklists_data
         card_dict['comentarios']   = comentarios_data
         cards_data.append(card_dict)
 
+    colunas = ColunasBoard.objects.filter(projeto=sprint.projeto).order_by('posicao')
     return Response({
         'id':          sprint.id,
         'nome':        sprint.nome,
@@ -1056,6 +1151,10 @@ def sprint_detail(request, sprint_id):
         'data_inicio': sprint.data_inicio,
         'data_fim':    sprint.data_fim,
         'projeto_id':  sprint.projeto_id,
+        'colunas': [
+            {'id': c.id, 'nome': c.nome, 'posicao': c.posicao, 'e_inicial': c.e_inicial, 'e_final': c.e_final}
+            for c in colunas
+        ],
         'cards':       cards_data,
     })
 
@@ -1079,26 +1178,57 @@ def sprint_encerrar(request, sprint_id):
     if sprint.status != 'ATIVA':
         return Response({'detail': 'Apenas sprints ATIVAS podem ser encerradas.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    proxima_sprint_id  = request.data.get('proxima_sprint_id')
+    proxima_sprint_nome = request.data.get('proxima_sprint_nome', '').strip()
     cards_para_backlog = request.data.get('cards_para_backlog', [])
     cards_para_sprint  = request.data.get('cards_para_sprint', [])
 
-    if cards_para_backlog:
-        Card.objects.filter(pk__in=cards_para_backlog, sprint=sprint).update(sprint=None)
+    if not proxima_sprint_nome:
+        return Response({'detail': 'proxima_sprint_nome é obrigatório ao encerrar a sprint.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if proxima_sprint_id and cards_para_sprint:
+    coluna_inicial = _coluna_inicial(projeto)
+    if coluna_inicial is None:
+        return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    with transaction.atomic():
         try:
-            proxima = Sprint.objects.get(pk=proxima_sprint_id, projeto=projeto)
-            Card.objects.filter(pk__in=cards_para_sprint, sprint=sprint).update(sprint=proxima)
-        except Sprint.DoesNotExist:
-            return Response({'detail': 'Próxima sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            sprint.status       = 'ENCERRADA'
+            sprint.data_fim     = timezone.now().date()
+            sprint.encerrada_em = timezone.now()
+            sprint.save(update_fields=['status', 'data_fim', 'encerrada_em'])
 
-    sprint.status       = 'ENCERRADA'
-    sprint.data_fim     = timezone.now().date()
-    sprint.encerrada_em = timezone.now()
-    sprint.save(update_fields=['status', 'data_fim', 'encerrada_em'])
+            proxima = Sprint.objects.create(
+                projeto=projeto,
+                nome=proxima_sprint_nome,
+                status='ATIVA',
+                data_inicio=timezone.now().date(),
+                criado_por=request.user,
+            )
+        except IntegrityError:
+            return Response(
+                {'detail': 'Não foi possível criar a próxima sprint. Verifique se já existe uma sprint ativa ou planejada.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
-    return Response({'id': sprint.id, 'status': sprint.status, 'data_fim': sprint.data_fim})
+        if cards_para_backlog:
+            Card.objects.filter(pk__in=cards_para_backlog, sprint=sprint).update(sprint=None)
+
+        if cards_para_sprint:
+            Card.objects.filter(pk__in=cards_para_sprint, sprint=sprint).update(
+                sprint=proxima,
+                coluna=coluna_inicial,
+            )
+
+    return Response({
+        'id': sprint.id,
+        'status': sprint.status,
+        'data_fim': sprint.data_fim,
+        'proxima_sprint': {
+            'id': proxima.id,
+            'nome': proxima.nome,
+            'status': proxima.status,
+            'data_inicio': proxima.data_inicio,
+        },
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1129,11 +1259,13 @@ def projeto_cards(request, projeto_id):
     responsavel_id = request.data.get('responsavel_id')
     due_date       = request.data.get('due_date')
     descricao      = request.data.get('descricao', '')
+    criterios_aceitacao = request.data.get('criterios_aceitacao')
+    estimativa_consolidada = request.data.get('estimativa_consolidada')
 
-    coluna = (
-        ColunasBoard.objects.filter(projeto=projeto, e_inicial=True).first()
-        or ColunasBoard.objects.filter(projeto=projeto).order_by('posicao').first()
-    )
+    if prioridade not in ('BAIXA', 'MEDIA', 'ALTA', 'URGENTE'):
+        return Response({'detail': 'prioridade deve ser BAIXA, MEDIA, ALTA ou URGENTE.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    coluna = _coluna_inicial(projeto)
     if coluna is None:
         return Response({'detail': 'Projeto não possui colunas configuradas.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -1146,6 +1278,10 @@ def projeto_cards(request, projeto_id):
         coluna=coluna,
         criado_por=request.user,
     )
+    if criterios_aceitacao is not None:
+        card_kwargs['criterios_aceitacao'] = criterios_aceitacao
+    if estimativa_consolidada not in (None, ''):
+        card_kwargs['estimativa_consolidada'] = estimativa_consolidada
 
     if sprint_id:
         try:
@@ -1154,10 +1290,12 @@ def projeto_cards(request, projeto_id):
             return Response({'detail': 'Sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
     if responsavel_id:
-        try:
-            card_kwargs['responsavel'] = Usuario.objects.get(pk=responsavel_id)
-        except Usuario.DoesNotExist:
+        responsavel = _usuario_ativo(responsavel_id)
+        if responsavel is None:
             return Response({'detail': 'Responsável não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if not _eh_membro_do_projeto(responsavel, projeto):
+            return Response({'detail': 'Responsável deve ser membro do projeto.'}, status=status.HTTP_400_BAD_REQUEST)
+        card_kwargs['responsavel'] = responsavel
 
     if due_date:
         card_kwargs['due_date'] = due_date
@@ -1228,11 +1366,16 @@ def card_detail(request, card_id):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     # PATCH — 'status' NÃO entra (property derivada). Use 'coluna_id'.
-    campos_simples = ['titulo', 'descricao', 'prioridade',
+    campos_simples = ['titulo', 'descricao', 'criterios_aceitacao', 'prioridade',
                       'passos_reproducao', 'resultado_esperado']
     for campo in campos_simples:
         if campo in request.data:
-            setattr(card, campo, request.data[campo])
+            valor = request.data[campo]
+            if campo == 'prioridade':
+                valor = valor.upper()
+                if valor not in ('BAIXA', 'MEDIA', 'ALTA', 'URGENTE'):
+                    return Response({'detail': 'prioridade deve ser BAIXA, MEDIA, ALTA ou URGENTE.'}, status=status.HTTP_400_BAD_REQUEST)
+            setattr(card, campo, valor)
 
     if 'coluna_id' in request.data:
         try:
@@ -1258,7 +1401,9 @@ def card_detail(request, card_id):
             card.responsavel = None
         else:
             try:
-                novo_resp = Usuario.objects.get(pk=resp_id)
+                novo_resp = Usuario.objects.get(pk=resp_id, ativo=True)
+                if not _eh_membro_do_projeto(novo_resp, projeto):
+                    return Response({'detail': 'Responsável deve ser membro do projeto.'}, status=status.HTTP_400_BAD_REQUEST)
                 antigo = card.responsavel.nome if card.responsavel else 'Ninguém'
                 card.responsavel = novo_resp
                 _registrar_historico(card, request.user, 'MUDANCA_RESPONSAVEL',
@@ -1391,6 +1536,15 @@ def card_estimativas(request, card_id):
         valor = request.data.get('valor')
         if valor is None:
             return Response({'detail': 'valor é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+        valor = str(valor)
+        if valor != '?':
+            try:
+                valor_num = int(valor)
+            except ValueError:
+                return Response({'detail': 'valor deve ser 1, 2, 3, 5, 8, 13, 21 ou ?.'}, status=status.HTTP_400_BAD_REQUEST)
+            if valor_num not in PLANNING_POKER_VALORES:
+                return Response({'detail': 'valor deve ser 1, 2, 3, 5, 8, 13, 21 ou ?.'}, status=status.HTTP_400_BAD_REQUEST)
+            valor = str(valor_num)
 
         estimativa, _ = Estimativa.objects.update_or_create(
             card=card, usuario=request.user,
@@ -1404,13 +1558,16 @@ def card_estimativas(request, card_id):
     if revelados or request.user.admin or cargo == 'GERENTE':
         data = [
             {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome,
-             'valor': v.valor, 'revelada': v.revelada}
+             'valor': v.valor if revelados else (None if cargo == 'GERENTE' and not request.user.admin else v.valor),
+             'votou': True,
+             'revelada': v.revelada}
             for v in votos
         ]
     else:
         data = [
             {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome,
              'valor': v.valor if v.usuario == request.user else None,
+             'votou': v.usuario == request.user,
              'revelada': v.revelada}
             for v in votos
         ]
@@ -1432,6 +1589,12 @@ def card_estimativa_revelar(request, card_id):
     estimativa_consolidada = request.data.get('estimativa_consolidada')
     if estimativa_consolidada is None:
         return Response({'detail': 'estimativa_consolidada é obrigatória.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        estimativa_consolidada = int(estimativa_consolidada)
+    except (TypeError, ValueError):
+        return Response({'detail': 'estimativa_consolidada deve ser numérica.'}, status=status.HTTP_400_BAD_REQUEST)
+    if estimativa_consolidada not in PLANNING_POKER_VALORES:
+        return Response({'detail': 'estimativa_consolidada deve ser 1, 2, 3, 5, 8, 13 ou 21.'}, status=status.HTTP_400_BAD_REQUEST)
 
     Estimativa.objects.filter(card=card).update(revelada=True)
     card.estimativa_consolidada = estimativa_consolidada

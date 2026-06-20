@@ -97,6 +97,9 @@ urlpatterns = [
     # GET   /admin/stats/          → métricas globais
     path('admin/stats/',                    views.admin_stats,              name='admin_stats'),
 
+    # GET   /usuarios/             → usuários ativos para seleção de membros
+    path('usuarios/',                       views.usuarios_list,            name='usuarios_list'),
+
     # GET   /admin/projetos/       → lista todos os projetos (visão admin)
     # POST  /admin/projetos/       → cria projeto + colunas Kanban padrão
     #   ✗  criar view admin_projetos
