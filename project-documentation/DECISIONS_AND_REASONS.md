@@ -24,6 +24,16 @@ member and **Projetos Admin** for organization-wide administration.
 permissions and purposes. Combining them would hide the distinction documented
 by `/projetos/` and `/admin/projetos/`.
 
+### Admin project ownership is not project management
+
+**Decision:** An administrator who creates a project does not automatically
+become `GERENTE`. The project must have at least one `GERENTE`, but that person
+can be the admin or another existing user.
+
+**Reason:** Admin is a high-level system role for project lifecycle management.
+`GERENTE` is the involved project role that manages sprint execution, cards and
+team routine inside one project.
+
 ### Project routes are contextual
 
 **Decision:** Show Board, Backlog, members, and sprint history only after a
@@ -38,6 +48,13 @@ role. Showing them globally implies a scope that does not exist.
 
 **Reason:** `GERENTE`, `DEV`, and `QA` belong to `projeto_membros`; one person
 may have different roles in different projects.
+
+### Project members come from existing users
+
+**Decision:** Project member assignment selects existing system users only.
+
+**Reason:** Invitation and account creation remain separate auth flows. Project
+membership should not create implicit accounts or duplicate invite behavior.
 
 ### No reports or recent-users dashboard widgets
 
@@ -86,6 +103,73 @@ OAuth, Resend, and populated backend data for frontend review.
 **Reason:** OAuth and email delivery test integrations, not most presentation
 states. Typed fixtures make visual and interaction review deterministic without
 inventing production backend APIs.
+
+### Fixed Board columns for Sprint 2
+
+**Decision:** Use fixed Board columns `To do`, `In Progress`, `Review`, `Done`.
+The column names remain in English for this delivery, while the rest of the app
+continues using pt-BR. Users cannot create columns and the structure remains
+fixed.
+
+**Reason:** The planning documents treat columns as generated project structure,
+not user-configurable workflow design. Keeping the structure fixed lowers
+implementation complexity and preserves predictable Sprint 2 behavior.
+
+### Card creation and estimation ownership
+
+**Decision:** Only `GERENTE` can create cards. A card can start in the backlog
+or in `To do` for a sprint. Deadline and difficulty are optional. Difficulty can
+be set manually or by ending Planning Poker.
+
+**Reason:** The endpoint contract marks card creation as `[GER]`, and card
+estimation is part of sprint planning rather than a required field for every
+task.
+
+### Planning Poker closure
+
+**Decision:** `GERENTE` can end Planning Poker even if not everyone voted. The
+manager should see who voted before closing, while vote values remain private
+until reveal.
+
+**Reason:** Sprint planning needs a practical moderator decision point. Hidden
+votes preserve estimation privacy; showing participation gives the manager
+enough context to decide whether to wait or close.
+
+### Sprint closure prepares the next sprint
+
+**Decision:** Closing a sprint should require next-sprint setup so work can
+continue immediately after the current sprint ends.
+
+**Reason:** Sprint 2 includes manual closure and migration of unfinished work.
+Requiring next-sprint context avoids leaving pending cards without a clear
+destination.
+
+### Sprint closure creates the next sprint inline
+
+**Decision:** The next sprint is created/configured inside the current sprint
+closure dialog. There is no separate sprint-planning page or stage for now.
+
+**Reason:** The current product scope expects the cycle to continue immediately
+after closure without adding a new planning workflow.
+
+### Single planned sprint per project remains strict
+
+**Decision:** Keep the rule of at most one `PLANEJADA` sprint per project.
+
+**Reason:** This matches the current schema and endpoint contract, and avoids
+introducing a future-sprint planning backlog that the application does not yet
+support.
+
+### Backlog card preparation for sprint
+
+**Decision:** Moving a backlog card into sprint `To do` opens the card creation
+or edit flow with existing details prefilled. The manager can review priority,
+title, description, acceptance criteria, responsible user, deadline and
+difficulty or Planning Poker.
+
+**Reason:** A backlog card can already contain useful product details, but
+entering a sprint is the point where execution-specific fields may need
+confirmation.
 
 ## Technical Decisions
 

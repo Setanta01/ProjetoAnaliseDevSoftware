@@ -177,5 +177,5 @@ npm run build
 ```
 
 Detalhes de ambiente, autenticação e e-mail estão em
-`project-documentation/LOCAL_SETUP_AND_AUTH_FLOW.md`. Segredos locais devem
-permanecer em arquivos ignorados pelo Git.
+`project-documentation/auth/LOCAL_SETUP_AND_AUTH_FLOW.md`. Segredos locais
+devem permanecer em arquivos ignorados pelo Git.

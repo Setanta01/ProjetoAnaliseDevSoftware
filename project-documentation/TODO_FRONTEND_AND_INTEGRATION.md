@@ -32,7 +32,7 @@
 ## Authentication and Account Management
 
 Track detailed completion status and contract blockers in
-[`AUTH_FLOW_TRACKER.md`](./AUTH_FLOW_TRACKER.md).
+[`AUTH_FLOW_TRACKER.md`](./auth/AUTH_FLOW_TRACKER.md).
 
 - [x] Wire first-administrator creation to the new backend endpoint.
 - [x] Verify valid invitation activation through the real UI. Keep expired,

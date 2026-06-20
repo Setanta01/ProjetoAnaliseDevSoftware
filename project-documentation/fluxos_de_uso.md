@@ -35,26 +35,28 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 
 ## 2. Fluxo de Criação de Projeto e Estruturação
 
-1. O **Administrador** cria um novo projeto (`POST /api/admin/projetos/`). O sistema gera automaticamente as `colunas_board` padronizadas e o projeto fica disponível na sua carteira de acompanhamento.
-2. O **Administrador (ou um Gerente já inserido)** vincula usuários logados na plataforma ao projeto (`POST /api/projetos/<id>/membros/`), definindo papéis de nível de projeto: `GERENTE`, `DEV` ou `QA`.
-3. **Papéis Contextuais:** Um usuário que atua como `DEV` no "Projeto A" pode atuar livremente como `GERENTE` no "Projeto B". As validações de autorização de operações de mutação validam o cargo apenas dentro do escopo do `<projeto_id>` acessado.
+1. O **Administrador** cria um novo projeto (`POST /api/admin/projetos/`) selecionando um usuário existente como `GERENTE` inicial. O administrador criador não entra automaticamente no projeto; ele pode se selecionar como gerente ou indicar outra pessoa.
+2. O sistema gera automaticamente as colunas fixas do Board: `To do`, `In Progress`, `Review`, `Done`. Essas colunas não são criadas manualmente por usuários.
+3. O **Administrador (ou um Gerente já inserido)** vincula usuários existentes na plataforma ao projeto (`POST /api/projetos/<id>/membros/`), definindo papéis de nível de projeto: `GERENTE`, `DEV` ou `QA`.
+4. Todo projeto deve manter ao menos um `GERENTE`.
+5. **Papéis Contextuais:** Um usuário que atua como `DEV` no "Projeto A" pode atuar livremente como `GERENTE` no "Projeto B". As validações de autorização de operações de mutação validam o cargo apenas dentro do escopo do `<projeto_id>` acessado.
 
 ---
 
 ## 3. Fluxo de Planejamento (Sprints e Poker)
 
 ### Construção do Backlog
-1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`).
+1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`). Título, descrição, prioridade e critérios de aceitação podem ser definidos nessa etapa; deadline e dificuldade são opcionais.
 
 ### Preparação da Sprint
 1. O **Gerente** cria uma sprint (`POST /api/projetos/<id>/sprints/`). Uma regra crucial de negócio: Sprints nascem como `PLANEJADA` e **não definem data de início ou de fim** durante o planejamento. O sistema não engessa datas futuras, respeitando Sprints que sofrem readequação de tamanho antes de entrarem em vigência.
-2. O Gerente arrasta/move os cards do Backlog para dentro dessa Sprint `PLANEJADA`. Ao fazer isso, o sistema aloca o card de forma automática na primeira coluna do board, representando a fase inicial (ex: "To Do" ou equivalente, baseada na coluna de menor `posicao`).
+2. O Gerente move cards do Backlog para dentro da Sprint. Ao fazer isso, o sistema abre o formulário do card com os dados já preenchidos e permite revisar informações específicas da sprint, como prioridade, título, descrição, critérios de aceitação, responsável, deadline e dificuldade/Planning Poker. O card entra sempre na coluna `To do`.
 
 ### Estimativa com Planning Poker
 1. O time precisa estimar os pontos de esforço para uma tarefa. O Gerente aciona no card a opção `pronto_para_estimativa = true`.
-2. Aos membros do projeto (DEVs e QAs) enviam via formulário privado (`POST /api/cards/<id>/estimativas/`) as suas notas de Planning Poker. **Os votos não ficam expostos à equipe até o encerramento do Poker.** Cada um só vê o seu próprio voto.
+2. Os membros do projeto (DEVs e QAs) enviam via formulário privado (`POST /api/cards/<id>/estimativas/`) as suas notas de Planning Poker usando a escala `1`, `2`, `3`, `5`, `8`, `13`, `21` ou `?`. **Os votos não ficam expostos à equipe até o encerramento do Poker.** Cada um só vê o seu próprio voto.
 3. Caso mudem de ideia na calada do planejamento, um novo POST atualiza/sobrescreve a pontuação.
-4. O Gerente (moderador do Poker) aciona o fechamento da estimativa (`POST /api/cards/<id>/estimativas/revelar/`). Todos os votos de `estimativas` mudam a propriedade de estado interno para `revelada = true`. O time agora visualiza os resultados no Card e o Gerente acorda e preenche o resultado consensual em `estimativa_consolidada`.
+4. O Gerente (moderador do Poker) vê quem já votou, sem ver os valores privados, e pode acionar o fechamento da estimativa (`POST /api/cards/<id>/estimativas/revelar/`) mesmo se nem todos votaram. Todos os votos de `estimativas` mudam a propriedade de estado interno para `revelada = true`. O time agora visualiza os resultados no Card e o Gerente preenche o resultado consensual em `estimativa_consolidada`.
 
 ### Iniciando a Sprint
 1. O Gerente inicia a Sprint (`POST /api/sprints/<id>/iniciar/`). A `data_inicio` do Banco passa a ser o instante em que esta chamada foi processada, e o `status` vai para `ATIVA`. A restrição sistêmica obriga a existir, no máximo, **1 ativa** por vez.
@@ -104,7 +106,7 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 1. A Sprint alcança o seu horizonte natural de encerramento prático.
 2. O **Gerente** efetiva a conclusão (`POST /api/sprints/<id>/encerrar/`).
 3. Imediatamente a API sela de maneira estática a coluna de Data Hora de Fim (`data_fim`).
-4. Porém o Ágil é mutável e as sobras ocorrem. Como não convém abandonar Cards para o limbo, a funcionalidade do endpoint abriga uma premissa obrigatória: o Payload enviará 2 Arrays declarando explicitamente a "Destinação dos Órfãos".
+4. Porém o Ágil é mutável e as sobras ocorrem. Como não convém abandonar Cards para o limbo, a funcionalidade do endpoint abriga uma premissa obrigatória: o Payload envia o nome da próxima sprint (`proxima_sprint_nome`) e 2 arrays declarando explicitamente a "Destinação dos Órfãos".
    - O array A conterá o ID dos cards que sofrem "regressão" e voltam ao estado frio do `Backlog`.
-   - O array B alocará o ID dos cards perfeitamente apontados e passados ativamente para o ID numérico da `próxima_sprint`.
-5. Em seguida a recém chegada `Próxima Sprint` inicia os trabalhos do Ciclo e vira `ATIVA`. O Fluxo retorna à normalidade e reinicia seu tráfego.
+   - O array B alocará o ID dos cards passados ativamente para a próxima sprint criada no encerramento.
+5. Em seguida a recém chegada `Próxima Sprint` inicia os trabalhos do Ciclo e vira `ATIVA`. O Fluxo retorna à normalidade e reinicia seu tráfego. Não há uma etapa separada de sprint planning nesta versão.
