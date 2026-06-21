@@ -60,9 +60,9 @@ export default function CreateCardModal({ projetoId, sprintId, mode = sprintId ?
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-      <DialogContent className="max-h-[90vh] max-w-3xl overflow-hidden p-0">
+      <DialogContent className="flex max-h-[90vh] max-w-3xl flex-col overflow-hidden p-0">
         <DialogHeader className="border-b border-border px-8 py-6"><DialogTitle>Criar Novo Card</DialogTitle><DialogDescription className="sr-only">Preencha os dados do novo card.</DialogDescription></DialogHeader>
-        <form className="flex min-h-0 flex-col" onSubmit={(event) => void handleSubmit(event)}>
+        <form className="flex min-h-0 flex-1 flex-col" onSubmit={(event) => void handleSubmit(event)}>
           <div className="space-y-5 overflow-y-auto px-8 py-6">
             {error && <Alert variant="destructive">{error}</Alert>}
             <Field label="Título *"><Input value={form.titulo} onChange={(event) => setForm({ ...form, titulo: event.target.value })} placeholder="Ex: Implementar tela de login" autoFocus /></Field>

@@ -47,7 +47,7 @@ export function FirstAdminSetupPage({ onComplete }: RegistrationPageProps) {
 export function InviteActivationPage({ onComplete }: RegistrationPageProps) {
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') ?? ''
-  const [form, setForm] = useState({ password: '', confirm: '' })
+  const [form, setForm] = useState({ name: '', password: '', confirm: '' })
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const inviteQuery = useQuery({
@@ -58,12 +58,12 @@ export function InviteActivationPage({ onComplete }: RegistrationPageProps) {
   })
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
-    if (!form.password) return setError('Defina uma senha para ativar a conta.')
+    if (!form.name.trim() || !form.password) return setError('Informe seu nome e defina uma senha para ativar a conta.')
     if (form.password !== form.confirm) return setError('As senhas não coincidem.')
     if (!token) return setError('O token do convite está ausente ou inválido.')
     setLoading(true)
     try {
-      await api.post('/auth/ativar-convite/', { token, senha: form.password, confirmar_senha: form.confirm })
+      await api.post('/auth/ativar-convite/', { token, nome: form.name.trim(), senha: form.password, confirmar_senha: form.confirm })
       await onComplete()
     } catch {
       setError('Não foi possível ativar o convite. Verifique se o link ainda é válido.')
@@ -77,7 +77,7 @@ export function InviteActivationPage({ onComplete }: RegistrationPageProps) {
       ? 'Este convite é inválido, expirou ou já foi utilizado.'
       : null
 
-  return <AuthRegistrationCard title="Ativar convite" subtitle="Complete seu cadastro para entrar na equipe Lazuli."><form className="space-y-4" onSubmit={(event) => void submit(event)}>{(error || inviteError) && <Alert variant="destructive">{error || inviteError}</Alert>}<Field label="E-mail convidado"><Input value={inviteQuery.data?.email ?? (inviteQuery.isLoading ? 'Validando convite...' : '')} disabled /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Criar senha"><Input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} disabled={!inviteQuery.data} /></Field><Field label="Confirmar senha"><Input type="password" value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} disabled={!inviteQuery.data} /></Field></div><Alert variant="info">{inviteQuery.data?.admin ? 'Este convite concede acesso administrativo global.' : 'Este convite concede acesso como usuário. As funções Gerente, Dev ou QA são definidas separadamente em cada projeto.'}</Alert><Button className="w-full" type="submit" disabled={loading || !inviteQuery.data}>{loading ? 'Ativando...' : 'Ativar conta'}</Button><BackToLogin /></form></AuthRegistrationCard>
+  return <AuthRegistrationCard title="Ativar convite" subtitle="Complete seu cadastro para entrar na equipe Lazuli."><form className="space-y-4" onSubmit={(event) => void submit(event)}>{(error || inviteError) && <Alert variant="destructive">{error || inviteError}</Alert>}<Field label="E-mail convidado"><Input value={inviteQuery.data?.email ?? (inviteQuery.isLoading ? 'Validando convite...' : '')} disabled /></Field><Field label="Nome completo"><Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Como seu nome deve aparecer no sistema" disabled={!inviteQuery.data || loading} /></Field><div className="grid gap-4 sm:grid-cols-2"><Field label="Criar senha"><Input type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} disabled={!inviteQuery.data} /></Field><Field label="Confirmar senha"><Input type="password" value={form.confirm} onChange={(event) => setForm({ ...form, confirm: event.target.value })} disabled={!inviteQuery.data} /></Field></div><Alert variant="info">{inviteQuery.data?.admin ? 'Este convite concede acesso administrativo global.' : 'Este convite concede acesso como usuário. As funções Gerente, Dev ou QA são definidas separadamente em cada projeto.'}</Alert><Button className="w-full" type="submit" disabled={loading || !inviteQuery.data}>{loading ? 'Ativando...' : 'Ativar conta'}</Button><BackToLogin /></form></AuthRegistrationCard>
 }
 
 function AuthRegistrationCard({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {

@@ -423,6 +423,7 @@ class Card(models.Model):
     ]
 
     id          = models.AutoField(primary_key=True)
+    codigo      = models.CharField(max_length=4, unique=True)
     projeto     = models.ForeignKey(
         Projeto, on_delete=models.CASCADE,
         db_column='projeto_id',

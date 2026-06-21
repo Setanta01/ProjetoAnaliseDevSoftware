@@ -17,9 +17,10 @@ interface BacklogViewProps {
   projetoId: number | null
   onNewCard: () => void
   onOpenCard: (id: number) => void
+  canManage: boolean
 }
 
-export default function BacklogView({ projetoId, onNewCard, onOpenCard }: BacklogViewProps) {
+export default function BacklogView({ projetoId, onNewCard, onOpenCard, canManage }: BacklogViewProps) {
   const [search, setSearch] = useState('')
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['backlog', projetoId],
@@ -30,7 +31,7 @@ export default function BacklogView({ projetoId, onNewCard, onOpenCard }: Backlo
 
   return (
     <PageContainer className="flex flex-col">
-      <PageHeader title="Backlog de Tasks" subtitle="Gestão de tasks não atribuídas à sprint." actions={<Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button>} />
+      <PageHeader title="Backlog de Tasks" subtitle="Gestão de tasks não atribuídas à sprint." actions={canManage ? <Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button> : undefined} />
       <DataPanel className="flex flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border bg-muted p-4"><SearchField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar no backlog..." /><Button variant="outline"><Filter className="h-4 w-4" /> Filtros</Button></div>
         <div className="flex-1 overflow-x-auto">

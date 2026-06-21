@@ -27,7 +27,7 @@ export default function MyProjectsView({ onSelect }: { onSelect: (project: Proje
                   </div>
                   <div className="mt-6 flex items-center justify-between border-t border-border pt-4">
                     <span className="flex items-center gap-2 text-sm text-muted-foreground"><Users className="h-4 w-4" /> {project.member_count ?? 0} membros</span>
-                    <Badge variant={project.status === 'ATIVO' ? 'success' : 'neutral'}>{project.status === 'ATIVO' ? 'Ativo' : 'Inativo'}</Badge>
+                    <Badge variant={project.status === 'ATIVO' ? 'success' : project.status === 'PAUSADO' ? 'warning' : 'neutral'}>{project.status === 'ATIVO' ? 'Ativo' : project.status === 'PAUSADO' ? 'Pausado' : 'Inativo'}</Badge>
                   </div>
                 </CardContent>
               </Card>

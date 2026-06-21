@@ -351,13 +351,14 @@ class AuthFlowTests(TestCase):
 
         response = views.auth_ativar_convite(self.factory.post(
             '/api/auth/ativar-convite/',
-            {'token': 'convite-token', 'senha': 'SenhaForte!2026', 'confirmar_senha': 'SenhaForte!2026'},
+            {'token': 'convite-token', 'nome': 'Pessoa Convidada', 'senha': 'SenhaForte!2026', 'confirmar_senha': 'SenhaForte!2026'},
             format='json',
         ))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(existing_user.nome, 'Pessoa Convidada')
         existing_user.set_password.assert_called_once_with('SenhaForte!2026')
-        existing_user.save.assert_called_once_with(update_fields=['admin', 'ativo', 'senha_hash', 'convidado_por'])
+        existing_user.save.assert_called_once_with(update_fields=['nome', 'admin', 'ativo', 'senha_hash', 'convidado_por'])
         convite.save.assert_called_once_with(update_fields=['usado'])
 
     @patch('api.views.enfileirar_email')

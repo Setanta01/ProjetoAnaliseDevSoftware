@@ -7,23 +7,30 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Progress } from '@/components/ui/progress'
+import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import EstimateDifficultyModal from '@/modals/EstimateDifficultyModal'
 import { cn } from '@/lib/utils'
-import type { ChecklistItem, Comentario, Task } from '@/types'
+import type { BoardColumn, ChecklistItem, Comentario, Prioridade, ProjectMember, Task } from '@/types'
 
 type ActivityTab = 'comments' | 'subtasks'
 
-interface CardDetailModalProps { cardId: number | null; onClose: () => void }
+interface CardDetailModalProps { cardId: number | null; canManage?: boolean; onClose: () => void }
 
-export default function CardDetailModal({ cardId, onClose }: CardDetailModalProps) {
+export default function CardDetailModal({ cardId, canManage = false, onClose }: CardDetailModalProps) {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<ActivityTab>('comments')
   const [comment, setComment] = useState('')
   const [newItem, setNewItem] = useState('')
   const [showEstimate, setShowEstimate] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [editForm, setEditForm] = useState({ titulo: '', descricao: '', prioridade: 'MEDIA' as Prioridade, responsavelId: '', dueDate: '', estimate: '', colunaId: '' })
   const { data: task, isLoading } = useQuery({ queryKey: ['task', cardId], queryFn: () => api.get<Task>(`/cards/${cardId}/`).then((response) => response.data), enabled: Boolean(cardId) })
+  const { data: members = [] } = useQuery({ queryKey: ['project-members', task?.projeto_id], queryFn: () => api.get<ProjectMember[]>(`/projetos/${task?.projeto_id}/membros/`).then((response) => response.data), enabled: canManage && Boolean(task?.projeto_id) })
+  const { data: columns = [] } = useQuery({ queryKey: ['project-columns', task?.projeto_id], queryFn: () => api.get<BoardColumn[]>(`/projetos/${task?.projeto_id}/colunas/`).then((response) => response.data), enabled: canManage && Boolean(task?.projeto_id) })
   const { data: comments = [] } = useQuery({ queryKey: ['task-comments', cardId], queryFn: () => api.get<ApiComment[]>(`/cards/${cardId}/comentarios/`).then((response) => response.data.map(normalizeComment)), enabled: Boolean(cardId) })
   const { data: checklist = [] } = useQuery({ queryKey: ['task-checklist', cardId], queryFn: () => api.get<ApiChecklist[]>(`/cards/${cardId}/checklists/`).then((response) => response.data.flatMap((checklistGroup) => checklistGroup.itens.map((item) => ({ id: item.id, task_id: cardId ?? 0, titulo: item.texto, concluido: item.concluido })))), enabled: Boolean(cardId) })
 
@@ -48,6 +55,26 @@ export default function CardDetailModal({ cardId, onClose }: CardDetailModalProp
     await queryClient.invalidateQueries({ queryKey: ['task-checklist', cardId] })
   }
 
+  const saveCard = async () => {
+    if (!cardId) return
+    await api.patch(`/cards/${cardId}/`, {
+      titulo: editForm.titulo.trim(),
+      descricao: editForm.descricao,
+      prioridade: editForm.prioridade,
+      responsavel_id: editForm.responsavelId ? Number(editForm.responsavelId) : null,
+      due_date: editForm.dueDate || null,
+      estimativa_consolidada: editForm.estimate ? Number(editForm.estimate) : null,
+      coluna_id: editForm.colunaId ? Number(editForm.colunaId) : undefined,
+      justificativa_prazo: 'Ajuste feito pelo gerente no detalhe do card.',
+    })
+    setEditing(false)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['task', cardId] }),
+      queryClient.invalidateQueries({ queryKey: ['board'] }),
+      queryClient.invalidateQueries({ queryKey: ['backlog'] }),
+    ])
+  }
+
   const completed = checklist.filter((item) => item.concluido).length
   const progress = checklist.length ? Math.round((completed / checklist.length) * 100) : 0
 
@@ -59,13 +86,14 @@ export default function CardDetailModal({ cardId, onClose }: CardDetailModalProp
             <DialogTitle className="sr-only">Detalhes do card {task.codigo}</DialogTitle><DialogDescription className="sr-only">Detalhes, comentários e subtarefas do card.</DialogDescription>
             <div className="grid h-full min-h-0 md:grid-cols-2">
               <section className="overflow-y-auto bg-card p-8">
-                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div>
+                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canManage && <Button size="sm" variant="outline" onClick={() => { if (!editing) setEditForm(formFromTask(task)); setEditing((value) => !value) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
                 <h2 className="mb-8 text-2xl font-bold leading-tight text-card-foreground">{task.titulo}</h2>
+                {editing && <EditCardForm form={editForm} members={members} columns={columns} onChange={setEditForm} onSave={saveCard} />}
                 <div className="mb-8 grid grid-cols-2 gap-x-8 gap-y-7">
                   <Meta label="Status"><Badge variant="info">• {statusLabel(task.status)}</Badge></Meta>
                   <Meta label="Prioridade"><span className="font-semibold text-primary">⌃ {priorityLabel(task.prioridade)}</span></Meta>
                   <Meta label="Responsável">{task.responsavel_nome ? <span className="flex items-center gap-2 font-semibold"><UserAvatar name={task.responsavel_nome} className="h-8 w-8" />{task.responsavel_nome}</span> : <span className="text-muted-foreground">Não atribuído</span>}</Meta>
-                  <Meta label="Estimativa"><div className="flex items-center gap-3">{task.estimativa_consolidada ? <strong>{task.estimativa_consolidada} Pontos</strong> : task.pronto_para_estimativa ? <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>Estimar dificuldade</Button> : <span className="text-muted-foreground">Não estimada</span>}</div></Meta>
+                  <Meta label="Estimativa"><div className="flex items-center gap-3">{task.estimativa_consolidada ? <><strong>{task.estimativa_consolidada} Pontos</strong>{canManage && <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>Alterar</Button>}</> : task.pronto_para_estimativa ? <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>{canManage ? 'Fechar Planning Poker' : 'Estimar dificuldade'}</Button> : canManage ? <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>Definir estimativa</Button> : <span className="text-muted-foreground">Não estimada</span>}</div></Meta>
                 </div>
                 <DetailSection title="Descrição"><p>{task.descricao || 'Sem descrição.'}</p></DetailSection>
                 {task.criterios_aceitacao && <DetailSection title="Critérios de aceitação"><ul className="list-disc space-y-2 pl-5">{task.criterios_aceitacao.split('\n').filter(Boolean).map((line) => <li key={line}>{line.replace(/^-\s*/, '')}</li>)}</ul></DetailSection>}
@@ -82,7 +110,7 @@ export default function CardDetailModal({ cardId, onClose }: CardDetailModalProp
                 </div>
               </section>
             </div>
-            <EstimateDifficultyModal task={task} open={showEstimate} onOpenChange={setShowEstimate} />
+            <EstimateDifficultyModal task={task} open={showEstimate} canManage={canManage} onOpenChange={setShowEstimate} onDone={() => { void queryClient.invalidateQueries({ queryKey: ['task', cardId] }) }} />
           </>
         )}
       </DialogContent>
@@ -90,6 +118,48 @@ export default function CardDetailModal({ cardId, onClose }: CardDetailModalProp
   )
 }
 
+type EditCardFormState = {
+  titulo: string
+  descricao: string
+  prioridade: Prioridade
+  responsavelId: string
+  dueDate: string
+  estimate: string
+  colunaId: string
+}
+
+function formFromTask(task: Task): EditCardFormState {
+  return {
+    titulo: task.titulo,
+    descricao: task.descricao ?? '',
+    prioridade: task.prioridade,
+    responsavelId: task.responsavel_id ? String(task.responsavel_id) : '',
+    dueDate: task.due_date ?? '',
+    estimate: task.estimativa_consolidada ? String(task.estimativa_consolidada) : '',
+    colunaId: task.coluna_id ? String(task.coluna_id) : '',
+  }
+}
+
+function EditCardForm({ form, members, columns, onChange, onSave }: { form: EditCardFormState; members: ProjectMember[]; columns: BoardColumn[]; onChange: (form: EditCardFormState) => void; onSave: () => Promise<void> }) {
+  return (
+    <div className="mb-8 space-y-4 rounded-lg border border-border bg-muted p-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Título"><Input value={form.titulo} onChange={(event) => onChange({ ...form, titulo: event.target.value })} /></Field>
+        <Field label="Prioridade"><Select value={form.prioridade} onChange={(event) => onChange({ ...form, prioridade: event.target.value as Prioridade })}><option value="BAIXA">Baixa</option><option value="MEDIA">Média</option><option value="ALTA">Alta</option><option value="URGENTE">Urgente</option></Select></Field>
+      </div>
+      <Field label="Descrição"><Textarea className="min-h-24" value={form.descricao} onChange={(event) => onChange({ ...form, descricao: event.target.value })} /></Field>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field label="Responsável"><Select value={form.responsavelId} onChange={(event) => onChange({ ...form, responsavelId: event.target.value })}><option value="">Não atribuído</option>{members.map((member) => <option key={member.id} value={member.id}>{member.nome}</option>)}</Select></Field>
+        <Field label="Coluna"><Select value={form.colunaId} onChange={(event) => onChange({ ...form, colunaId: event.target.value })}>{columns.map((column) => <option key={column.id} value={column.id}>{column.nome}</option>)}</Select></Field>
+        <Field label="Prazo"><Input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></Field>
+        <Field label="Estimativa"><Select value={form.estimate} onChange={(event) => onChange({ ...form, estimate: event.target.value })}><option value="">Não estimada</option>{[1, 2, 3, 5, 8, 13, 21].map((value) => <option key={value} value={value}>{value} pontos</option>)}</Select></Field>
+      </div>
+      <div className="flex justify-end"><Button onClick={() => void onSave()}>Salvar alterações</Button></div>
+    </div>
+  )
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <div className="space-y-2"><Label>{label}</Label>{children}</div> }
 function Meta({ label, children }: { label: string; children: React.ReactNode }) { return <div><p className="mb-2 text-xs font-bold uppercase tracking-wider text-muted-foreground">{label}</p><div className="text-sm text-card-foreground">{children}</div></div> }
 function DetailSection({ title, children }: { title: string; children: React.ReactNode }) { return <section className="mb-7"><h3 className="mb-3 border-b border-border pb-3 text-sm font-bold">{title}</h3><div className="text-sm leading-relaxed text-muted-foreground">{children}</div></section> }
 function Tab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) { return <button className={cn('border-b-2 py-1 text-sm font-semibold', active ? 'border-primary text-primary' : 'border-transparent text-muted-foreground')} onClick={onClick}>{children}</button> }
@@ -99,7 +169,7 @@ function CommentList({ comments }: { comments: Comentario[] }) {
 }
 
 function Checklist({ items, progress, onToggle }: { items: ChecklistItem[]; progress: number; onToggle: (item: ChecklistItem) => Promise<void> }) {
-  return <div><div className="mb-4 flex items-center justify-between"><h4 className="font-bold">Checklist do Desenvolvedor</h4><span className="text-sm text-primary">Adicionar item</span></div><div className="space-y-3">{items.map((item) => <label key={item.id} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border bg-card p-4 shadow-sm', !item.concluido && 'border-primary/30')}><Checkbox checked={item.concluido} onCheckedChange={() => void onToggle(item)} /><span className={cn('text-sm', item.concluido && 'text-muted-foreground line-through')}>{item.titulo}</span></label>)}</div><Progress value={progress} className="mt-5" /><p className="mt-3 text-right text-xs text-muted-foreground">{progress}% Concluído</p></div>
+  return <div><div className="mb-4"><h4 className="font-bold">Checklist do Desenvolvedor</h4></div><div className="space-y-3">{items.map((item) => <label key={item.id} className={cn('flex cursor-pointer items-center gap-3 rounded-lg border bg-card p-4 shadow-sm', !item.concluido && 'border-primary/30')}><Checkbox checked={item.concluido} onCheckedChange={() => void onToggle(item)} /><span className={cn('text-sm', item.concluido && 'text-muted-foreground line-through')}>{item.titulo}</span></label>)}</div><Progress value={progress} className="mt-5" /><p className="mt-3 text-right text-xs text-muted-foreground">{progress}% Concluído</p></div>
 }
 
 function statusLabel(status: Task['status']) { return { BACKLOG: 'Backlog', TODO: 'A Fazer', EM_ANDAMENTO: 'Em Progresso', REVISAO: 'Revisão', CONCLUIDO: 'Concluído', BLOQUEADO: 'Bloqueado' }[status] }

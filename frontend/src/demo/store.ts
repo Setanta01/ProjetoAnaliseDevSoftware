@@ -39,6 +39,16 @@ function nextId(items: Array<{ id: number }>) {
   return Math.max(0, ...items.map((item) => item.id)) + 1
 }
 
+function shortCode(id: number) {
+  return `#${id.toString(16).toUpperCase().padStart(4, '0').slice(-4)}`
+}
+
+function projectWithState(project: Projeto): Projeto {
+  const memberCount = database.members[project.id]?.length ?? project.member_count ?? 0
+  const hasActiveSprint = database.sprints.some((sprint) => sprint.projeto_id === project.id && sprint.status === 'ATIVA')
+  return { ...project, member_count: memberCount, status: project.arquivado ? 'INATIVO' : hasActiveSprint ? 'ATIVO' : 'PAUSADO' }
+}
+
 const demoColumns: BoardColumn[] = [
   { id: 1, nome: 'To do', posicao: 1, e_inicial: true },
   { id: 2, nome: 'In Progress', posicao: 2 },
@@ -69,8 +79,8 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   const url = new URL(config.url ?? '/', 'http://lazuli.demo')
   const path = url.pathname.replace(/^\/api/, '').replace(/\/$/, '') || '/'
 
-  if (method === 'GET' && path === '/projetos') return response(config, structuredClone(database.projects.filter((project) => project.meu_cargo)))
-  if (method === 'GET' && path === '/admin/projetos') return response(config, structuredClone(database.projects))
+  if (method === 'GET' && path === '/projetos') return response(config, structuredClone(database.projects.filter((project) => project.meu_cargo).map(projectWithState)))
+  if (method === 'GET' && path === '/admin/projetos') return response(config, structuredClone(database.projects.map(projectWithState)))
   if (method === 'GET' && path === '/usuarios') return response(config, usersFromMembers())
   if (method === 'GET' && path === '/sprints') return response(config, structuredClone(database.sprints))
 
@@ -78,7 +88,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   if (method === 'GET' && projectDetailMatch) {
     const project = database.projects.find((item) => item.id === Number(projectDetailMatch[1]))
     if (!project) throw new Error('Projeto não encontrado no modo demonstração.')
-    return response(config, structuredClone(project))
+    return response(config, structuredClone(projectWithState(project)))
   }
 
   const projectSprintsMatch = path.match(/^\/projetos\/(\d+)\/sprints$/)
@@ -264,10 +274,24 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   }
 
   const estimateMatch = path.match(/^\/(?:tasks|cards)\/(\d+)\/estimativas$/)
+  if (method === 'GET' && estimateMatch) {
+    return response(config, [{ usuario_id: 3, usuario_nome: 'Carlos Dev', valor: null, votou: true, revelada: false }])
+  }
   if (method === 'POST' && estimateMatch) {
     const task = database.tasks.find((item) => item.id === Number(estimateMatch[1]))
     if (!task) throw new Error('Task não encontrada no modo demonstração.')
     return response(config, { message: 'Voto registrado de forma privada.' }, 201)
+  }
+
+  const revealEstimateMatch = path.match(/^\/cards\/(\d+)\/estimativas\/revelar$/)
+  if (method === 'POST' && revealEstimateMatch) {
+    const task = database.tasks.find((item) => item.id === Number(revealEstimateMatch[1]))
+    if (!task) throw new Error('Task não encontrada no modo demonstração.')
+    const payload = parsePayload<{ estimativa_consolidada: number }>(config.data)
+    task.estimativa_consolidada = payload.estimativa_consolidada
+    task.pronto_para_estimativa = false
+    saveDatabase()
+    return response(config, { estimativa_consolidada: task.estimativa_consolidada, detail: 'Votos revelados.' })
   }
 
   const createCardMatch = path.match(/^\/projetos\/(\d+)\/cards$/)
@@ -289,7 +313,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     const id = nextId(database.tasks)
     const task: Task = {
       id,
-      codigo: `ALF-${id}`,
+      codigo: shortCode(id),
       titulo: payload.titulo,
       descricao: payload.descricao,
       prioridade: payload.prioridade ?? 'MEDIA',
@@ -308,6 +332,30 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     database.tasks.unshift(task)
     saveDatabase()
     return response(config, structuredClone(task), 201)
+  }
+
+  const cardDetailMatch = path.match(/^\/cards\/(\d+)$/)
+  if (cardDetailMatch) {
+    const task = database.tasks.find((item) => item.id === Number(cardDetailMatch[1]))
+    if (!task) throw new Error('Task não encontrada no modo demonstração.')
+    if (method === 'GET') return response(config, structuredClone(task))
+    if (method === 'PATCH') {
+      const payload = parsePayload<Partial<Task> & { responsavel_id?: number | null; coluna_id?: number; estimativa_consolidada?: number | null }>(config.data)
+      Object.assign(task, payload)
+      if (payload.coluna_id) {
+        task.coluna_nome = demoColumns.find((column) => column.id === payload.coluna_id)?.nome
+        task.status = ({ 1: 'TODO', 2: 'EM_ANDAMENTO', 3: 'REVISAO', 4: 'CONCLUIDO' } as const)[payload.coluna_id] ?? task.status
+      }
+      if (payload.responsavel_id === null) {
+        task.responsavel_nome = undefined
+      } else if (payload.responsavel_id) {
+        const member = Object.values(database.members).flat().find((item) => item.id === payload.responsavel_id)
+        task.responsavel_nome = member?.nome
+      }
+      if (payload.estimativa_consolidada) task.pronto_para_estimativa = false
+      saveDatabase()
+      return response(config, structuredClone(task))
+    }
   }
 
   const projectMatch = path.match(/^\/(?:admin\/)?projetos\/(\d+)$/)

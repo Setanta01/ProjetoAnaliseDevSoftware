@@ -1,6 +1,7 @@
 # backend/api/views.py
 
 import secrets
+import string
 from datetime import timedelta, datetime
 
 from django.contrib.auth import authenticate
@@ -60,6 +61,23 @@ COLUNAS_PADRAO = [
 COLUNA_VALIDACAO_NOME = 'Review'
 BOOTSTRAP_ADMIN_LOCK_ID = 12648430
 PLANNING_POKER_VALORES = {1, 2, 3, 5, 8, 13, 21}
+
+
+def _status_projeto(projeto):
+    if projeto.arquivado:
+        return 'INATIVO'
+    if Sprint.objects.filter(projeto=projeto, status='ATIVA').exists():
+        return 'ATIVO'
+    return 'PAUSADO'
+
+
+def _gerar_codigo_card():
+    alfabeto = string.ascii_uppercase + string.digits
+    for _ in range(20):
+        codigo = ''.join(secrets.choice(alfabeto) for _ in range(4))
+        if not Card.objects.filter(codigo=codigo).exists():
+            return codigo
+    raise IntegrityError('Não foi possível gerar código único para o card.')
 
 
 def _cargo_no_projeto(user, projeto):
@@ -140,6 +158,7 @@ def _serializar_card(card, tem_novidade=False):
     """Serializa um card. Garanta select_related('coluna') antes de chamar."""
     return {
         'id': card.id,
+        'codigo': f'#{card.codigo}',
         'titulo': card.titulo,
         'descricao': card.descricao,
         'criterios_aceitacao': getattr(card, 'criterios_aceitacao', None),
@@ -344,11 +363,12 @@ def auth_convite_info(request):
 def auth_ativar_convite(request):
     """POST /auth/ativar-convite/ — ativa conta via token de convite."""
     token            = request.data.get('token', '').strip()
+    nome             = request.data.get('nome', '').strip()
     senha            = request.data.get('senha', '')
     confirmar_senha  = request.data.get('confirmar_senha', '')
 
-    if not token or not senha:
-        return Response({'detail': 'Token e senha são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not token or not nome or not senha:
+        return Response({'detail': 'Nome, token e senha são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
     if senha != confirmar_senha:
         return Response({'detail': 'As senhas não coincidem.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -373,7 +393,7 @@ def auth_ativar_convite(request):
         # CORREÇÃO: Adicionado 'convidado_por=convite.criado_por'
         user = Usuario.objects.create(
             email=convite.email,
-            nome=convite.email.split('@')[0],
+            nome=nome,
             ativo=False,
             admin=convite.admin,
             convidado_por=convite.criado_por,  # <-- AQUI
@@ -381,12 +401,13 @@ def auth_ativar_convite(request):
 
     # Atualiza os dados do usuário
     user.admin = convite.admin
+    user.nome = nome
     user.ativo = True
     user.convidado_por = convite.criado_por # <-- AQUI (garante que, se o usuário já existia inativo, ele pega o conviter)
     user.set_password(senha)
     
     # Salva apenas os campos alterados
-    user.save(update_fields=['admin', 'ativo', 'senha_hash', 'convidado_por'])
+    user.save(update_fields=['nome', 'admin', 'ativo', 'senha_hash', 'convidado_por'])
 
     convite.usado = True
     convite.save(update_fields=['usado'])
@@ -687,7 +708,7 @@ def admin_projetos(request):
                 'nome':       p.nome,
                 'descricao':  p.descricao,
                 'arquivado':  p.arquivado,
-                'status':     'INATIVO' if p.arquivado else 'ATIVO',
+                'status':     _status_projeto(p),
                 'criado_em':  p.criado_em,
                 'membros':    p.num_membros,
                 'member_count': p.num_membros,
@@ -781,7 +802,9 @@ def projetos_list(request):
     """GET /projetos/ — projetos do usuário logado via projeto_membros."""
     memberships = ProjetoMembro.objects.filter(
         usuario=request.user, projeto__arquivado=False
-    ).select_related('projeto').order_by('-projeto__criado_em')
+    ).select_related('projeto').annotate(
+        num_membros=Count('projeto__projeto_membros')
+    ).order_by('-projeto__criado_em')
 
     data = [
         {
@@ -790,7 +813,9 @@ def projetos_list(request):
             'descricao': m.projeto.descricao,
             'cargo':     m.cargo,
             'meu_cargo': m.cargo,
-            'status':    'INATIVO' if m.projeto.arquivado else 'ATIVO',
+            'status':    _status_projeto(m.projeto),
+            'member_count': m.num_membros,
+            'membros_count': m.num_membros,
             'criado_em': m.projeto.criado_em,
         }
         for m in memberships
@@ -816,6 +841,8 @@ def projeto_detail(request, projeto_id):
             'arquivado':    projeto.arquivado,
             'criado_em':    projeto.criado_em,
             'meu_cargo':    cargo,
+            'member_count': membros.count(),
+            'status':       _status_projeto(projeto),
             'membros': [
                 {'id': m.usuario.id, 'nome': m.usuario.nome, 'email': m.usuario.email, 'cargo': m.cargo}
                 for m in membros
@@ -1294,6 +1321,7 @@ def projeto_cards(request, projeto_id):
 
     card_kwargs = dict(
         projeto=projeto,
+        codigo=_gerar_codigo_card(),
         titulo=titulo,
         tipo=tipo,
         prioridade=prioridade,
@@ -1453,6 +1481,20 @@ def card_detail(request, card_id):
                 due_date_nova=request.data['due_date'],
             )
         card.due_date = request.data['due_date']
+
+    if 'estimativa_consolidada' in request.data:
+        valor = request.data['estimativa_consolidada']
+        if valor in (None, ''):
+            card.estimativa_consolidada = None
+        else:
+            try:
+                valor = int(valor)
+            except (TypeError, ValueError):
+                return Response({'detail': 'estimativa_consolidada deve ser numérica.'}, status=status.HTTP_400_BAD_REQUEST)
+            if valor not in PLANNING_POKER_VALORES:
+                return Response({'detail': 'estimativa_consolidada deve ser 1, 2, 3, 5, 8, 13 ou 21.'}, status=status.HTTP_400_BAD_REQUEST)
+            card.estimativa_consolidada = valor
+            card.pronto_para_estimativa = False
 
     card.save()
     return Response(_serializar_card(card))

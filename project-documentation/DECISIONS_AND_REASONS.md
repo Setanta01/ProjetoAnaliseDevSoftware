@@ -177,6 +177,26 @@ sprint.
 entering a sprint is the point where execution-specific fields may need
 confirmation.
 
+### Card editing before drag-and-drop
+
+**Decision:** `GERENTE` can edit title, description, priority, responsible,
+deadline, estimate and board column from the card detail modal. Drag-and-drop
+movement remains a later UI improvement.
+
+**Reason:** The backend already exposes the stable `PATCH /cards/<id>/`
+contract. Using it from the existing modal fixes the actual workflow with much
+less frontend entropy than adding drag-and-drop state management at this stage.
+
+### Invite activation name and session duration
+
+**Decision:** User activation by invite requires a manually entered full name
+and no longer derives the display name from the email address. Local access
+tokens last 24 hours.
+
+**Reason:** The invited user is the only reliable source for their display name.
+The project is a university prototype and should not interrupt testing sessions
+with short token expiry.
+
 ## Technical Decisions
 
 ### Semantic Tailwind tokens and shadcn-compatible primitives

@@ -17,6 +17,10 @@ as temporary MFA tokens. It is not a database credential. Database access uses
 the separate `DB_NAME`, `DB_USER`, `DB_PASSWORD`, `DB_HOST`, and `DB_PORT`
 variables.
 
+Authentication uses JWT. In the local project configuration, access tokens last
+24 hours and refresh tokens last 7 days, so normal manual testing should not log
+the user out in less than one day.
+
 ## Create PostgreSQL for the First Time
 
 Choose a local password and use the same value in `backend/.env`:

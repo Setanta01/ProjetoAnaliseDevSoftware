@@ -17,7 +17,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { getErrorMessage } from '@/lib/errors'
 import type { Sprint, SprintDetail } from '@/types'
 
-export default function SprintHistoryView({ projectId }: { projectId: number }) {
+export default function SprintHistoryView({ projectId, canManage }: { projectId: number; canManage: boolean }) {
   const queryClient = useQueryClient()
   const [createOpen, setCreateOpen] = useState(false)
   const [closeOpen, setCloseOpen] = useState(false)
@@ -47,11 +47,11 @@ export default function SprintHistoryView({ projectId }: { projectId: number }) 
 
   return (
     <PageContainer className="flex flex-col">
-      <PageHeader title="Sprints" subtitle="Controle o ciclo atual e acompanhe entregas encerradas." actions={<Button onClick={() => setCreateOpen(true)} disabled={Boolean(plannedSprint)}><Plus className="h-4 w-4" /> Nova Sprint</Button>} />
+      <PageHeader title="Sprints" subtitle="Controle o ciclo atual e acompanhe entregas encerradas." actions={canManage ? <Button onClick={() => setCreateOpen(true)} disabled={Boolean(plannedSprint)}><Plus className="h-4 w-4" /> Nova Sprint</Button> : undefined} />
       {error && <Alert variant="destructive" className="mb-4">{error}</Alert>}
       <div className="mb-5 grid gap-4 md:grid-cols-2">
-        <DataPanel title="Sprint ativa">{isLoading ? <LoadingState /> : activeSprint ? <div className="space-y-4 p-4"><div><Badge variant="info">Ativa</Badge><h2 className="mt-3 text-lg font-bold">{activeSprint.nome}</h2><p className="text-sm text-muted-foreground">Iniciada em {formatDate(activeSprint.data_inicio)}</p></div><Button variant="outline" onClick={() => setCloseOpen(true)}><SquareCheckBig className="h-4 w-4" /> Encerrar Sprint</Button></div> : <EmptyState message="Nenhuma sprint ativa." />}</DataPanel>
-        <DataPanel title="Sprint planejada">{isLoading ? <LoadingState /> : plannedSprint ? <div className="space-y-4 p-4"><div><Badge variant="planning">Planejada</Badge><h2 className="mt-3 text-lg font-bold">{plannedSprint.nome}</h2></div><Button onClick={() => void startSprint(plannedSprint)}><Play className="h-4 w-4" /> Iniciar Sprint</Button></div> : <EmptyState message="Nenhuma sprint planejada." />}</DataPanel>
+        <DataPanel title="Sprint ativa">{isLoading ? <LoadingState /> : activeSprint ? <div className="space-y-4 p-4"><div><Badge variant="info">Ativa</Badge><h2 className="mt-3 text-lg font-bold">{activeSprint.nome}</h2><p className="text-sm text-muted-foreground">Iniciada em {formatDate(activeSprint.data_inicio)}</p></div>{canManage && <Button variant="outline" onClick={() => setCloseOpen(true)}><SquareCheckBig className="h-4 w-4" /> Encerrar Sprint</Button>}</div> : <EmptyState message="Nenhuma sprint ativa." />}</DataPanel>
+        <DataPanel title="Sprint planejada">{isLoading ? <LoadingState /> : plannedSprint ? <div className="space-y-4 p-4"><div><Badge variant="planning">Planejada</Badge><h2 className="mt-3 text-lg font-bold">{plannedSprint.nome}</h2></div>{canManage && <Button onClick={() => void startSprint(plannedSprint)}><Play className="h-4 w-4" /> Iniciar Sprint</Button>}</div> : <EmptyState message="Nenhuma sprint planejada." />}</DataPanel>
       </div>
       <DataPanel className="flex-1 overflow-hidden">
         {isLoading ? <LoadingState /> : (

@@ -41,7 +41,7 @@ export default function AdminProjectsView() {
       <DataPanel className="flex-1 overflow-hidden">
         {isLoading ? <LoadingState variant="table" label="Carregando projetos..." /> : filteredProjects.length === 0 ? <EmptyState message={searchTerm ? `Nenhum projeto encontrado para "${searchTerm}"` : 'Nenhum projeto cadastrado ainda.'} /> : (
           <div className="overflow-x-auto"><Table><TableHeader><TableRow><TableHead>Nome do Projeto</TableHead><TableHead>Membros</TableHead><TableHead>Status</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader><TableBody>
-            {filteredProjects.map((project) => <TableRow key={project.id}><TableCell><span className="flex items-center gap-3 font-semibold"><span className={project.status === 'ATIVO' || !project.arquivado ? 'h-7 w-1 rounded-full bg-success' : 'h-7 w-1 rounded-full bg-border'} />{project.nome}</span></TableCell><TableCell className="text-muted-foreground">{project.member_count ?? project.membros ?? 0}</TableCell><TableCell><span className={project.status === 'ATIVO' || !project.arquivado ? 'inline-flex rounded-full bg-success-muted px-3 py-1 text-xs font-semibold text-success-foreground' : 'inline-flex rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground'}>{project.status === 'INATIVO' || project.arquivado ? 'Inativo' : 'Ativo'}</span></TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" onClick={() => setDialog({ type: 'edit', project })} title="Editar"><Edit2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-muted-foreground hover:bg-danger-muted hover:text-destructive" onClick={() => setDialog({ type: 'delete', project })} title="Excluir"><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}
+            {filteredProjects.map((project) => <TableRow key={project.id}><TableCell><span className="flex items-center gap-3 font-semibold"><span className={projectStatusAccent(project)} />{project.nome}</span></TableCell><TableCell className="text-muted-foreground">{project.member_count ?? project.membros ?? 0}</TableCell><TableCell><span className={projectStatusClass(project)}>{projectStatusLabel(project)}</span></TableCell><TableCell><div className="flex justify-end gap-1"><Button variant="ghost" size="icon" onClick={() => setDialog({ type: 'edit', project })} title="Editar"><Edit2 className="h-4 w-4" /></Button><Button variant="ghost" size="icon" className="text-muted-foreground hover:bg-danger-muted hover:text-destructive" onClick={() => setDialog({ type: 'delete', project })} title="Excluir"><Trash2 className="h-4 w-4" /></Button></div></TableCell></TableRow>)}
           </TableBody></Table></div>
         )}
       </DataPanel>
@@ -49,6 +49,24 @@ export default function AdminProjectsView() {
       <DeleteProjectDialog project={dialog?.type === 'delete' ? dialog.project : null} onClose={() => setDialog(null)} onSuccess={() => void refresh()} />
     </PageContainer>
   )
+}
+
+function projectStatusLabel(project: Projeto) {
+  if (project.status === 'INATIVO' || project.arquivado) return 'Inativo'
+  if (project.status === 'PAUSADO') return 'Pausado'
+  return 'Ativo'
+}
+
+function projectStatusClass(project: Projeto) {
+  if (project.status === 'ATIVO') return 'inline-flex rounded-full bg-success-muted px-3 py-1 text-xs font-semibold text-success-foreground'
+  if (project.status === 'PAUSADO') return 'inline-flex rounded-full bg-warning-muted px-3 py-1 text-xs font-semibold text-warning'
+  return 'inline-flex rounded-full bg-secondary px-3 py-1 text-xs font-semibold text-secondary-foreground'
+}
+
+function projectStatusAccent(project: Projeto) {
+  if (project.status === 'ATIVO') return 'h-7 w-1 rounded-full bg-success'
+  if (project.status === 'PAUSADO') return 'h-7 w-1 rounded-full bg-warning'
+  return 'h-7 w-1 rounded-full bg-border'
 }
 
 function ProjectFormDialog({ dialog, onClose, onSuccess }: { dialog: Extract<ProjectDialog, { type: 'create' | 'edit' }> | null; onClose: () => void; onSuccess: () => void }) {

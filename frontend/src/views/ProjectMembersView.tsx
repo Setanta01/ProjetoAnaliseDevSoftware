@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { getErrorMessage } from '@/lib/errors'
 import type { Cargo, ProjectMember, ProjectRole, Usuario } from '@/types'
 
-export default function ProjectMembersView({ projectId }: { projectId: number }) {
+export default function ProjectMembersView({ projectId, canManage }: { projectId: number; canManage: boolean }) {
   const queryClient = useQueryClient()
   const [usuarioId, setUsuarioId] = useState('')
   const [cargo, setCargo] = useState<ProjectRole>('DEV')
@@ -70,7 +70,7 @@ export default function ProjectMembersView({ projectId }: { projectId: number })
   return (
     <PageContainer>
       <PageHeader title="Membros da Equipe" subtitle="Pessoas e funções dentro deste projeto." />
-      <DataPanel className="mb-5">
+      {canManage && <DataPanel className="mb-5">
         <div className="space-y-4 p-4">
           {error && <Alert variant="destructive">{error}</Alert>}
           <div className="grid gap-3 md:grid-cols-[1fr_160px_auto]">
@@ -79,8 +79,9 @@ export default function ProjectMembersView({ projectId }: { projectId: number })
             <Button onClick={() => void addMember()} disabled={loading}><Plus className="h-4 w-4" /> Adicionar</Button>
           </div>
         </div>
-      </DataPanel>
-      <DataPanel>{isLoading ? <LoadingState /> : <Table><TableHeader><TableRow><TableHead>Membro</TableHead><TableHead>E-mail</TableHead><TableHead>Função no projeto</TableHead><TableHead className="text-right">Ações</TableHead></TableRow></TableHeader><TableBody>{members.map((member) => <TableRow key={member.id}><TableCell><span className="flex items-center gap-3 font-semibold"><UserAvatar name={member.nome} />{member.nome}</span></TableCell><TableCell className="text-muted-foreground">{member.email}</TableCell><TableCell><div className="flex items-center gap-2"><RoleBadge cargo={member.cargo as Cargo} /><Select className="h-8 w-32" value={member.cargo} onChange={(event) => void updateRole(member, event.target.value as ProjectRole)}><option value="GERENTE">GERENTE</option><option value="DEV">DEV</option><option value="QA">QA</option></Select></div></TableCell><TableCell className="text-right"><Button variant="ghost" size="icon" className="text-muted-foreground hover:bg-danger-muted hover:text-destructive" onClick={() => void removeMember(member)} aria-label="Remover membro"><Trash2 className="h-4 w-4" /></Button></TableCell></TableRow>)}</TableBody></Table>}</DataPanel>
+      </DataPanel>}
+      {!canManage && error && <Alert variant="destructive" className="mb-4">{error}</Alert>}
+      <DataPanel>{isLoading ? <LoadingState /> : <Table><TableHeader><TableRow><TableHead>Membro</TableHead><TableHead>E-mail</TableHead><TableHead>Função no projeto</TableHead>{canManage && <TableHead className="text-right">Ações</TableHead>}</TableRow></TableHeader><TableBody>{members.map((member) => <TableRow key={member.id}><TableCell><span className="flex items-center gap-3 font-semibold"><UserAvatar name={member.nome} />{member.nome}</span></TableCell><TableCell className="text-muted-foreground">{member.email}</TableCell><TableCell><div className="flex items-center gap-2"><RoleBadge cargo={member.cargo as Cargo} />{canManage && <Select className="h-8 w-32" value={member.cargo} onChange={(event) => void updateRole(member, event.target.value as ProjectRole)}><option value="GERENTE">GERENTE</option><option value="DEV">DEV</option><option value="QA">QA</option></Select>}</div></TableCell>{canManage && <TableCell className="text-right"><Button variant="ghost" size="icon" className="text-muted-foreground hover:bg-danger-muted hover:text-destructive" onClick={() => void removeMember(member)} aria-label="Remover membro"><Trash2 className="h-4 w-4" /></Button></TableCell>}</TableRow>)}</TableBody></Table>}</DataPanel>
     </PageContainer>
   )
 }

@@ -233,6 +233,7 @@ CREATE TABLE permissoes_coluna (
 
 CREATE TABLE cards (
     id                      SERIAL PRIMARY KEY,
+    codigo                  VARCHAR(4)      NOT NULL UNIQUE,
     projeto_id              INT             NOT NULL,
     sprint_id               INT,                       -- NULL = backlog
     coluna_id               INT             NOT NULL,

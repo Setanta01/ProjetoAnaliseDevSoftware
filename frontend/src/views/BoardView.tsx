@@ -15,12 +15,12 @@ interface BoardViewProps {
   projetoId: number | null
   onOpenCard: (id: number) => void
   onNewCard: () => void
-  isAdmin: boolean
+  canManage: boolean
 }
 
 const priorityWeight = { URGENTE: 4, ALTA: 3, MEDIA: 2, BAIXA: 1 } as const
 
-export default function BoardView({ sprintId, onOpenCard, onNewCard }: BoardViewProps) {
+export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage }: BoardViewProps) {
   const queryClient = useQueryClient()
   const [viewMode, setViewMode] = useState<ViewMode>('kanban')
   const { data: sprint, isLoading } = useQuery({
@@ -48,7 +48,7 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard }: BoardView
     <main className="flex h-full flex-col overflow-hidden px-6 pt-6">
       <header className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div><div className="mb-1 flex items-center gap-3"><Badge variant="info">Sprint Ativa</Badge></div><h1 className="text-3xl font-bold tracking-tight text-foreground">Board {sprint?.nome ?? ''}</h1></div>
-        <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button><Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button></div>
+        <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button>{canManage && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button>}</div>
       </header>
       {isLoading ? (
         <LoadingState label="Carregando quadro..." />
@@ -60,7 +60,7 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard }: BoardView
           })}
         </div>
       ) : (
-        <div className="mb-6 flex-1 overflow-y-auto rounded-lg border border-border bg-card"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Título</TableHead><TableHead>Tipo</TableHead><TableHead>Prioridade</TableHead><TableHead>Coluna</TableHead><TableHead>Pontos</TableHead></TableRow></TableHeader><TableBody>{sortedTasks.map((task) => <TableRow key={task.id} className="cursor-pointer" onClick={() => void openCard(task.id)}><TableCell className="font-mono text-muted-foreground">{task.codigo ?? task.id}</TableCell><TableCell className="font-semibold">{task.titulo}</TableCell><TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell><TableCell>{task.prioridade}</TableCell><TableCell>{task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status}</TableCell><TableCell>{task.estimativa_consolidada ?? '-'}</TableCell></TableRow>)}</TableBody></Table></div>
+        <div className="mb-6 flex-1 overflow-y-auto rounded-lg border border-border bg-card"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Título</TableHead><TableHead>Tipo</TableHead><TableHead>Prioridade</TableHead><TableHead>Coluna</TableHead><TableHead>Pontos</TableHead></TableRow></TableHeader><TableBody>{sortedTasks.map((task) => <TableRow key={task.id} className="cursor-pointer" onClick={() => void openCard(task.id)}><TableCell className="font-mono text-muted-foreground">{task.codigo ?? `#${task.id}`}</TableCell><TableCell className="font-semibold">{task.titulo}</TableCell><TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell><TableCell>{task.prioridade}</TableCell><TableCell>{task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status}</TableCell><TableCell>{task.estimativa_consolidada ?? '-'}</TableCell></TableRow>)}</TableBody></Table></div>
       )}
     </main>
   )

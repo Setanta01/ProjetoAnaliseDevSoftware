@@ -63,8 +63,10 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [x] Manter nomes das colunas em ingles para esta entrega, enquanto o restante
   da aplicacao continua em pt-BR.
 - [x] Usar **Board** como nome da area de quadro.
-- [ ] Mover card por `PATCH /api/cards/<id>/` com `coluna_id`.
-- [ ] Alterar responsavel por `PATCH /api/cards/<id>/` com `responsavel_id`.
+- [x] Mover card por `PATCH /api/cards/<id>/` com `coluna_id` via edicao do
+  detalhe do card. Drag-and-drop fica fora deste pacote para conter
+  complexidade.
+- [x] Alterar responsavel por `PATCH /api/cards/<id>/` com `responsavel_id`.
 - [x] Invalidar queries relevantes apos mutacoes.
 - [ ] Usar optimistic update simples apenas no movimento de card, com rollback
   visivel se o backend rejeitar permissao.
@@ -79,6 +81,8 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [x] Gerente visualiza quem ja votou sem revelar os valores privados.
 - [x] Gerente revela e grava `estimativa_consolidada` via
   `/api/cards/<id>/estimativas/revelar/`.
+- [x] Detalhe do card atualiza o botao/estado visual depois do voto ou
+  fechamento do Planning Poker.
 - [x] Permitir que o gerente encerre a estimativa mesmo sem todos votarem.
 - [x] Usar escala `[1, 2, 3, 5, 8, 13, 21]` e `?`.
 - [x] Atualizar badge/flag visual do card quando `pronto_para_estimativa` estiver
@@ -105,6 +109,9 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [ ] Adicionar apenas testes simples e descartaveis quando eles verificarem
   contrato sem aumentar peso arquitetural.
 - [ ] Atualizar esta documentacao depois de cada bloco fechado.
+- [x] Corrigir permissoes visuais para DEV/QA nao verem acoes de GERENTE como
+  criar sprint, criar card e gerenciar cargos.
+- [x] Corrigir IDs de card para codigo curto unico de 4 caracteres.
 
 ## Contratos Esperados Pelo Frontend
 
