@@ -128,12 +128,12 @@ task.
 ### Planning Poker closure
 
 **Decision:** `GERENTE` can end Planning Poker even if not everyone voted. The
-manager should see who voted before closing, while vote values remain private
-until reveal.
+manager sees who voted and which vote values were received, but these are kept
+as separate lists. The UI and API do not connect a person to a vote value.
 
 **Reason:** Sprint planning needs a practical moderator decision point. Hidden
-votes preserve estimation privacy; showing participation gives the manager
-enough context to decide whether to wait or close.
+votes preserve estimation privacy; showing participation and the anonymous
+value set gives the manager enough context to decide whether to wait or close.
 
 ### Sprint closure prepares the next sprint
 

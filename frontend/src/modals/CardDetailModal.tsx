@@ -110,7 +110,7 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
                 </div>
               </section>
             </div>
-            <EstimateDifficultyModal task={task} open={showEstimate} canManage={canManage} onOpenChange={setShowEstimate} onDone={() => { void queryClient.invalidateQueries({ queryKey: ['task', cardId] }) }} />
+            <EstimateDifficultyModal task={task} open={showEstimate} canManage={canManage} onOpenChange={setShowEstimate} onDone={() => { void queryClient.refetchQueries({ queryKey: ['task', cardId], type: 'active' }) }} />
           </>
         )}
       </DialogContent>

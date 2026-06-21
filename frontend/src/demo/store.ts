@@ -275,7 +275,11 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
 
   const estimateMatch = path.match(/^\/(?:tasks|cards)\/(\d+)\/estimativas$/)
   if (method === 'GET' && estimateMatch) {
-    return response(config, [{ usuario_id: 3, usuario_nome: 'Carlos Dev', valor: null, votou: true, revelada: false }])
+    return response(config, {
+      votantes: [{ usuario_id: 3, usuario_nome: 'Carlos Dev', votou: true }],
+      votos_recebidos: [5],
+      revelada: false,
+    })
   }
   if (method === 'POST' && estimateMatch) {
     const task = database.tasks.find((item) => item.id === Number(estimateMatch[1]))

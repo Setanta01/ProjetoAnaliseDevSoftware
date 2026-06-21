@@ -1622,14 +1622,15 @@ def card_estimativas(request, card_id):
     votos = Estimativa.objects.filter(card=card).select_related('usuario')
     revelados = votos.filter(revelada=True).exists()
 
-    if revelados or request.user.admin or cargo == 'GERENTE':
-        data = [
-            {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome,
-             'valor': v.valor if revelados else (None if cargo == 'GERENTE' and not request.user.admin else v.valor),
-             'votou': True,
-             'revelada': v.revelada}
-            for v in votos
-        ]
+    if request.user.admin or cargo == 'GERENTE':
+        data = {
+            'votantes': [
+                {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome, 'votou': True}
+                for v in votos
+            ],
+            'votos_recebidos': [v.valor for v in votos],
+            'revelada': revelados,
+        }
     else:
         data = [
             {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome,
