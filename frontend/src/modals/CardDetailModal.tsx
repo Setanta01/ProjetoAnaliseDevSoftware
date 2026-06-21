@@ -26,13 +26,15 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
   const [comment, setComment] = useState('')
   const [newItem, setNewItem] = useState('')
   const [showEstimate, setShowEstimate] = useState(false)
-  const [editing, setEditing] = useState(false)
+  const [editingCardId, setEditingCardId] = useState<number | null>(null)
   const [editForm, setEditForm] = useState({ titulo: '', descricao: '', prioridade: 'MEDIA' as Prioridade, responsavelId: '', dueDate: '', estimate: '', colunaId: '' })
   const { data: task, isLoading } = useQuery({ queryKey: ['task', cardId], queryFn: () => api.get<Task>(`/cards/${cardId}/`).then((response) => response.data), enabled: Boolean(cardId) })
   const { data: members = [] } = useQuery({ queryKey: ['project-members', task?.projeto_id], queryFn: () => api.get<ProjectMember[]>(`/projetos/${task?.projeto_id}/membros/`).then((response) => response.data), enabled: canManage && Boolean(task?.projeto_id) })
   const { data: columns = [] } = useQuery({ queryKey: ['project-columns', task?.projeto_id], queryFn: () => api.get<BoardColumn[]>(`/projetos/${task?.projeto_id}/colunas/`).then((response) => response.data), enabled: canManage && Boolean(task?.projeto_id) })
   const { data: comments = [] } = useQuery({ queryKey: ['task-comments', cardId], queryFn: () => api.get<ApiComment[]>(`/cards/${cardId}/comentarios/`).then((response) => response.data.map(normalizeComment)), enabled: Boolean(cardId) })
   const { data: checklist = [] } = useQuery({ queryKey: ['task-checklist', cardId], queryFn: () => api.get<ApiChecklist[]>(`/cards/${cardId}/checklists/`).then((response) => response.data.flatMap((checklistGroup) => checklistGroup.itens.map((item) => ({ id: item.id, task_id: cardId ?? 0, titulo: item.texto, concluido: item.concluido })))), enabled: Boolean(cardId) })
+
+  const editing = Boolean(cardId && editingCardId === cardId)
 
   const addComment = async () => {
     if (!cardId || !comment.trim()) return
@@ -67,7 +69,7 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
       coluna_id: editForm.colunaId ? Number(editForm.colunaId) : undefined,
       justificativa_prazo: 'Ajuste feito pelo gerente no detalhe do card.',
     })
-    setEditing(false)
+    setEditingCardId(null)
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['task', cardId] }),
       queryClient.invalidateQueries({ queryKey: ['board'] }),
@@ -86,7 +88,7 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
             <DialogTitle className="sr-only">Detalhes do card {task.codigo}</DialogTitle><DialogDescription className="sr-only">Detalhes, comentários e subtarefas do card.</DialogDescription>
             <div className="grid h-full min-h-0 md:grid-cols-2">
               <section className="overflow-y-auto bg-card p-8">
-                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canManage && <Button size="sm" variant="outline" onClick={() => { if (!editing) setEditForm(formFromTask(task)); setEditing((value) => !value) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
+                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canManage && <Button size="sm" variant="outline" onClick={() => { if (editing) { setEditingCardId(null); return } setEditForm(formFromTask(task)); setEditingCardId(task.id) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
                 <h2 className="mb-8 text-2xl font-bold leading-tight text-card-foreground">{task.titulo}</h2>
                 {editing && <EditCardForm form={editForm} members={members} columns={columns} onChange={setEditForm} onSave={saveCard} />}
                 <div className="mb-8 grid grid-cols-2 gap-x-8 gap-y-7">
@@ -154,7 +156,7 @@ function EditCardForm({ form, members, columns, onChange, onSave }: { form: Edit
         <Field label="Prazo"><Input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></Field>
         <Field label="Estimativa"><Select value={form.estimate} onChange={(event) => onChange({ ...form, estimate: event.target.value })}><option value="">Não estimada</option>{[1, 2, 3, 5, 8, 13, 21].map((value) => <option key={value} value={value}>{value} pontos</option>)}</Select></Field>
       </div>
-      <div className="flex justify-end"><Button onClick={() => void onSave()}>Salvar alterações</Button></div>
+      <div className="flex justify-end"><Button type="button" onClick={() => void onSave()}>Salvar alterações</Button></div>
     </div>
   )
 }
