@@ -47,8 +47,9 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [x] Permitir iniciar sprint planejada via `/api/sprints/<id>/iniciar/`.
 - [x] Conectar Backlog a `/api/projetos/<id>/backlog/`.
 - [x] Criar card no backlog ou na sprint usando `/api/projetos/<id>/cards/`.
-- [~] Ao mover backlog para sprint, abrir fluxo com dados do backlog
-  pre-preenchidos e solicitar apenas campos especificos da sprint.
+- [x] Permitir mover backlog para a sprint ativa, entrando sempre em `To do`.
+- [~] Ao mover backlog para sprint, revisar dados especificos da sprint em
+  fluxo dedicado quando for necessario refinar a experiencia.
 - [x] Criacao no backlog limitada a dados independentes da sprint; prioridade,
   responsavel, deadline e dificuldade/Planning Poker ficam para cards em sprint.
 - [x] Permitir marcar card de sprint como aguardando Planning Poker na criacao.
@@ -63,13 +64,16 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [x] Manter nomes das colunas em ingles para esta entrega, enquanto o restante
   da aplicacao continua em pt-BR.
 - [x] Usar **Board** como nome da area de quadro.
-- [x] Mover card por `PATCH /api/cards/<id>/` com `coluna_id` via edicao do
-  detalhe do card. Drag-and-drop fica fora deste pacote para conter
-  complexidade.
+- [x] Mover card por `PATCH /api/cards/<id>/` com `coluna_id`.
+- [x] Centralizar movimentacao de coluna no Board por drag-and-drop com
+  `dnd-kit`; edicao do card nao altera coluna.
+- [x] Permitir que usuario responsavel pelo card mova esse card entre colunas,
+  mesmo sem cargo `GERENTE`.
 - [x] Alterar responsavel por `PATCH /api/cards/<id>/` com `responsavel_id`.
+- [x] Permitir que qualquer membro assuma card sem responsavel.
 - [x] Invalidar queries relevantes apos mutacoes.
-- [ ] Usar optimistic update simples apenas no movimento de card, com rollback
-  visivel se o backend rejeitar permissao.
+- [x] Usar optimistic update simples apenas no movimento de card, com rollback
+  automatico se o backend rejeitar permissao.
 - [ ] Registrar e exibir historico basico quando abrir o card.
 
 ### 4. Planning Poker
@@ -108,10 +112,12 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 - [x] Testar frontend com typecheck, lint e build.
 - [ ] Adicionar apenas testes simples e descartaveis quando eles verificarem
   contrato sem aumentar peso arquitetural.
-- [ ] Atualizar esta documentacao depois de cada bloco fechado.
+- [x] Atualizar esta documentacao depois de cada bloco fechado.
 - [x] Corrigir permissoes visuais para DEV/QA nao verem acoes de GERENTE como
   criar sprint, criar card e gerenciar cargos.
 - [x] Corrigir IDs de card para codigo curto unico de 4 caracteres.
+- [x] Permitir remover cards do backlog quando o usuario pode gerenciar o
+  projeto.
 
 ## Contratos Esperados Pelo Frontend
 
@@ -161,7 +167,14 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
   dificuldade. Esses campos sao especificos da entrada/execucao em sprint.
 - `GET /api/cards/<id>/`: detalhe completo.
 - `PATCH /api/cards/<id>/`: edita campos, `coluna_id`, `responsavel_id` e
-  `due_date` quando aplicavel.
+  `due_date` quando aplicavel. No frontend, `coluna_id` deve ser enviado apenas
+  pelo Board. Tambem aceita `sprint_id` para mover card de backlog para sprint
+  ativa, sempre posicionando o card em `To do`.
+- Usuarios sem cargo `GERENTE` podem enviar `responsavel_id` apenas para assumir
+  um card ainda sem responsavel, e podem enviar `coluna_id` apenas em cards sob
+  sua responsabilidade.
+- `DELETE /api/cards/<id>/`: remove card quando o usuario tem permissao de
+  gerenciamento.
 - `GET /api/cards/<id>/historico/`: historico de mudancas.
 
 ### Planning Poker

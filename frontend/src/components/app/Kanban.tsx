@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { useDraggable, useDroppable } from '@dnd-kit/core'
 import { CalendarDays, MessageSquare, MoreHorizontal } from 'lucide-react'
 import { UserAvatar } from '@/components/app/UserAvatar'
 import { Badge } from '@/components/ui/badge'
@@ -6,24 +7,33 @@ import { Button } from '@/components/ui/button'
 import { cn } from '@/lib/utils'
 import type { Task } from '@/types'
 
-export function KanbanColumn({ title, count, children }: { title: string; count: number; children: ReactNode }) {
+export const kanbanColumnWidth = 'w-[clamp(16rem,22vw,24rem)]'
+
+export function KanbanColumn({ id, title, count, children }: { id: number; title: string; count: number; children: ReactNode }) {
+  const { isOver, setNodeRef } = useDroppable({ id: `column-${id}` })
+
   return (
-    <section className="flex w-80 shrink-0 flex-col">
-      <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-bold text-card-foreground">{title} <span className="ml-2 text-sm text-muted-foreground">({count})</span></h2>
+    <section ref={setNodeRef} className={cn('flex min-h-0 shrink-0 flex-col', kanbanColumnWidth)}>
+      <div className="mb-3 flex items-center justify-between">
+        <h2 className="text-base font-bold text-card-foreground">{title} <span className="ml-1 text-sm text-muted-foreground">({count})</span></h2>
         <Button variant="ghost" size="icon" className="text-muted-foreground"><MoreHorizontal className="h-5 w-5" /></Button>
       </div>
-      <div className="min-h-[28rem] flex-1 space-y-3 overflow-y-auto rounded-lg border border-border bg-kanban-column p-3">{children}</div>
+      <div className={cn('min-h-0 flex-1 space-y-3 overflow-y-auto rounded-lg border border-border bg-kanban-column p-2.5 transition-colors', isOver && 'border-primary bg-primary/5')}>{children}</div>
     </section>
   )
 }
 
-export function KanbanTaskCard({ task, onClick }: { task: Task; onClick: () => void }) {
+export function KanbanTaskCard({ task, canDrag = false, isOverlay = false, onClick }: { task: Task; canDrag?: boolean; isOverlay?: boolean; onClick: () => void }) {
+  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
+    id: `task-${task.id}`,
+    disabled: !canDrag || isOverlay,
+    data: { taskId: task.id, columnId: task.coluna_id },
+  })
   const deadline = getDeadlineState(task.due_date)
   const accent = task.impedido ? 'border-l-destructive' : deadline?.kind === 'urgent' ? 'border-l-urgent' : task.pronto_para_estimativa ? 'border-l-planning' : 'border-l-transparent'
 
   return (
-    <button className={cn('group relative block w-full rounded-md border border-l-4 border-border bg-card p-4 text-left shadow-sm transition hover:border-primary/40 hover:shadow-md', accent)} onClick={onClick}>
+    <button ref={isOverlay ? undefined : setNodeRef} className={cn('group relative block w-full rounded-md border border-l-4 border-border bg-card p-3.5 text-left shadow-sm transition hover:border-primary/40 hover:shadow-md', accent, canDrag && 'cursor-grab active:cursor-grabbing', isDragging && 'opacity-40', isOverlay && `rotate-1 opacity-95 shadow-2xl ${kanbanColumnWidth}`)} onClick={onClick} {...(isOverlay ? {} : listeners)} {...(isOverlay ? {} : attributes)}>
       {(task.tem_novidade || task.novos_comentarios) && <span className="absolute -right-2 -top-2 flex h-6 w-6 items-center justify-center rounded-full bg-destructive text-destructive-foreground shadow"><MessageSquare className="h-3.5 w-3.5 fill-current" /></span>}
       <div className="mb-3 flex flex-wrap gap-2">
         <Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge>

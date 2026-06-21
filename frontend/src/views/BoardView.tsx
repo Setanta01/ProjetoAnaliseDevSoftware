@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Filter, Plus, Users } from 'lucide-react'
 import api from '@/api'
 import { KanbanColumn, KanbanTaskCard } from '@/components/app/Kanban'
@@ -9,7 +10,7 @@ import { ViewToggle, type ViewMode } from '@/components/app/ViewToggle'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import type { SprintDetail } from '@/types'
+import type { SprintDetail, Task } from '@/types'
 
 interface BoardViewProps {
   sprintId: number | null
@@ -17,18 +18,47 @@ interface BoardViewProps {
   onOpenCard: (id: number) => void
   onNewCard: () => void
   canManage: boolean
+  currentUserId?: number
 }
 
 const priorityWeight = { URGENTE: 4, ALTA: 3, MEDIA: 2, BAIXA: 1 } as const
 
-export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage }: BoardViewProps) {
+export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, currentUserId }: BoardViewProps) {
   const queryClient = useQueryClient()
   const [viewMode, setViewMode] = useState<ViewMode>('kanban')
+  const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const { data: sprint, isLoading } = useQuery({
     queryKey: ['board', sprintId],
     queryFn: () => api.get<SprintDetail>(`/sprints/${sprintId}/`).then((response) => response.data),
     enabled: Boolean(sprintId),
     refetchInterval: 5000,
+  })
+  const moveCardMutation = useMutation({
+    mutationFn: ({ taskId, columnId }: { taskId: number; columnId: number }) => api.patch<Task>(`/cards/${taskId}/`, { coluna_id: columnId }).then((response) => response.data),
+    onMutate: async ({ taskId, columnId }) => {
+      if (!sprintId) return { previousSprint: undefined as SprintDetail | undefined }
+      await queryClient.cancelQueries({ queryKey: ['board', sprintId] })
+      const previousSprint = queryClient.getQueryData<SprintDetail>(['board', sprintId])
+      queryClient.setQueryData<SprintDetail>(['board', sprintId], (current) => {
+        if (!current) return current
+        const column = current.colunas.find((item) => item.id === columnId)
+        return {
+          ...current,
+          cards: current.cards.map((task) => task.id === taskId ? { ...task, coluna_id: columnId, coluna_nome: column?.nome ?? task.coluna_nome } : task),
+        }
+      })
+      return { previousSprint }
+    },
+    onError: (_error, _variables, context) => {
+      if (sprintId && context?.previousSprint) queryClient.setQueryData(['board', sprintId], context.previousSprint)
+    },
+    onSettled: async (_data, _error, variables) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['board', sprintId] }),
+        queryClient.invalidateQueries({ queryKey: ['task', variables?.taskId] }),
+      ])
+    },
   })
 
   if (!sprintId) return <div className="p-8 text-center text-muted-foreground">Selecione uma sprint ativa.</div>
@@ -45,24 +75,55 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage }
     onOpenCard(id)
   }
 
+  const moveCard = (taskId: number, columnId: number) => {
+    const task = tasks.find((item) => item.id === taskId)
+    if (!canMoveTask(task)) return
+    moveCardMutation.mutate({ taskId, columnId })
+  }
+
+  const canMoveTask = (task?: Task) => Boolean(task && (canManage || task.responsavel_id === currentUserId))
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const taskId = event.active.data.current?.taskId
+    setActiveTaskId(typeof taskId === 'number' ? taskId : null)
+  }
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    const taskId = event.active.data.current?.taskId
+    const currentColumnId = event.active.data.current?.columnId
+    const targetColumnId = typeof event.over?.id === 'string' && event.over.id.startsWith('column-') ? Number(event.over.id.replace('column-', '')) : null
+    setActiveTaskId(null)
+    if (typeof taskId !== 'number' || typeof currentColumnId !== 'number' || !targetColumnId || currentColumnId === targetColumnId) return
+    moveCard(taskId, targetColumnId)
+  }
+
+  const activeTask = activeTaskId ? tasks.find((task) => task.id === activeTaskId) : undefined
+
   return (
-    <main className="flex h-full flex-col overflow-hidden px-6 pt-6">
-      <header className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div><div className="mb-1 flex items-center gap-3"><Badge variant="info">Sprint Ativa</Badge></div><h1 className="text-3xl font-bold tracking-tight text-foreground">Board {sprint?.nome ?? ''}</h1></div>
-        <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button>{canManage && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button>}</div>
-      </header>
-      {isLoading ? (
-        <LoadingState label="Carregando quadro..." />
-      ) : viewMode === 'kanban' ? (
-        <div className="flex flex-1 gap-6 overflow-x-auto pb-6">
-          {columns.map((column) => {
-            const columnTasks = sortedTasks.filter((task) => task.coluna_id === column.id)
-            return <KanbanColumn key={column.id} title={column.nome} count={columnTasks.length}>{columnTasks.map((task) => <KanbanTaskCard key={task.id} task={task} onClick={() => void openCard(task.id)} />)}</KanbanColumn>
-          })}
-        </div>
-      ) : (
-        <div className="mb-6 flex-1 overflow-y-auto rounded-lg border border-border bg-card"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Título</TableHead><TableHead>Tipo</TableHead><TableHead>Prioridade</TableHead><TableHead>Coluna</TableHead><TableHead>Pontos</TableHead></TableRow></TableHeader><TableBody className="[&_tr:last-child]:border-b">{sortedTasks.map((task) => <TableRow key={task.id} className="cursor-pointer border-border" onClick={() => void openCard(task.id)}><TableCell className="font-mono text-muted-foreground">{task.codigo ?? `#${task.id}`}</TableCell><TableCell className="font-semibold">{task.titulo}</TableCell><TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell><TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell><TableCell>{task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status}</TableCell><TableCell>{task.estimativa_consolidada ?? '-'}</TableCell></TableRow>)}</TableBody></Table></div>
-      )}
+    <main className="flex h-full flex-col overflow-hidden px-4 pt-5 xl:px-5">
+      <div className="mx-auto flex h-full w-full max-w-[1700px] flex-col overflow-hidden">
+        <header className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div><div className="mb-1 flex items-center gap-3"><Badge variant="info">Sprint Ativa</Badge></div><h1 className="text-3xl font-bold tracking-tight text-foreground">Board {sprint?.nome ?? ''}</h1></div>
+          <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button>{canManage && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button>}</div>
+        </header>
+        {isLoading ? (
+          <LoadingState label="Carregando quadro..." />
+        ) : viewMode === 'kanban' ? (
+          <DndContext sensors={sensors} onDragStart={handleDragStart} onDragCancel={() => setActiveTaskId(null)} onDragEnd={handleDragEnd}>
+            <div className="min-h-0 flex-1 overflow-x-auto pb-5">
+              <div className="mx-auto flex h-full w-max min-w-full justify-center gap-3">
+                {columns.map((column) => {
+                  const columnTasks = sortedTasks.filter((task) => task.coluna_id === column.id)
+                  return <KanbanColumn key={column.id} id={column.id} title={column.nome} count={columnTasks.length}>{columnTasks.map((task) => <KanbanTaskCard key={task.id} task={task} canDrag={canMoveTask(task)} onClick={() => void openCard(task.id)} />)}</KanbanColumn>
+                })}
+              </div>
+            </div>
+            <DragOverlay>{activeTask && <KanbanTaskCard task={activeTask} isOverlay onClick={() => undefined} />}</DragOverlay>
+          </DndContext>
+        ) : (
+          <div className="mb-6 flex-1 overflow-y-auto rounded-lg border border-border bg-card"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Título</TableHead><TableHead>Tipo</TableHead><TableHead>Prioridade</TableHead><TableHead>Coluna</TableHead><TableHead>Pontos</TableHead></TableRow></TableHeader><TableBody className="[&_tr:last-child]:border-b">{sortedTasks.map((task) => <TableRow key={task.id} className="cursor-pointer border-border" onClick={() => void openCard(task.id)}><TableCell className="font-mono text-muted-foreground">{task.codigo ?? `#${task.id}`}</TableCell><TableCell className="font-semibold">{task.titulo}</TableCell><TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell><TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell><TableCell>{task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status}</TableCell><TableCell>{task.estimativa_consolidada ?? '-'}</TableCell></TableRow>)}</TableBody></Table></div>
+        )}
+      </div>
     </main>
   )
 }

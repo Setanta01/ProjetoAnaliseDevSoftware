@@ -212,9 +212,33 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     const task = database.tasks.find((item) => item.id === taskId)
     if (!task) throw new Error('Task não encontrada no modo demonstração.')
     if (method === 'GET') return response(config, structuredClone(task))
+    if (method === 'DELETE') {
+      database.tasks = database.tasks.filter((item) => item.id !== taskId)
+      database.comments = database.comments.filter((item) => item.task_id !== taskId)
+      database.checklistItems = database.checklistItems.filter((item) => item.task_id !== taskId)
+      saveDatabase()
+      return response(config, null, 204)
+    }
     if (method === 'PATCH') {
-      const payload = parsePayload<Partial<Pick<Task, 'titulo' | 'descricao' | 'status' | 'prioridade'>>>(config.data)
+      const payload = parsePayload<Partial<Task> & { responsavel_id?: number | null; coluna_id?: number; sprint_id?: number; estimativa_consolidada?: number | null }>(config.data)
       Object.assign(task, payload)
+      if (payload.sprint_id) {
+        task.sprint_id = payload.sprint_id
+        task.coluna_id = 1
+        task.coluna_nome = 'To do'
+        task.status = 'TODO'
+      }
+      if (payload.coluna_id) {
+        task.coluna_nome = demoColumns.find((column) => column.id === payload.coluna_id)?.nome
+        task.status = ({ 1: 'TODO', 2: 'EM_ANDAMENTO', 3: 'REVISAO', 4: 'CONCLUIDO' } as const)[payload.coluna_id] ?? task.status
+      }
+      if (payload.responsavel_id === null) {
+        task.responsavel_nome = undefined
+      } else if (payload.responsavel_id) {
+        const member = Object.values(database.members).flat().find((item) => item.id === payload.responsavel_id)
+        task.responsavel_nome = member?.nome
+      }
+      if (payload.estimativa_consolidada) task.pronto_para_estimativa = false
       saveDatabase()
       return response(config, structuredClone(task))
     }

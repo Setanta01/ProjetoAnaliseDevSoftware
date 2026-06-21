@@ -633,8 +633,8 @@ class JustificativaPrazo(models.Model):
         db_column='usuario_id',
         related_name='justificativas_prazo',
     )
-    due_date_anterior = models.DateField()
-    due_date_nova     = models.DateField()
+    due_date_anterior = models.DateField(null=True, blank=True)
+    due_date_nova     = models.DateField(null=True, blank=True)
     justificativa     = models.TextField()
     criado_em         = models.DateTimeField(auto_now_add=True)
 

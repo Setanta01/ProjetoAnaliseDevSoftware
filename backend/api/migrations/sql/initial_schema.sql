@@ -342,8 +342,8 @@ CREATE TABLE justificativas_prazo (
     id                SERIAL PRIMARY KEY,
     card_id           INT         NOT NULL,
     usuario_id        INT         NOT NULL,
-    due_date_anterior DATE        NOT NULL,
-    due_date_nova     DATE        NOT NULL,
+    due_date_anterior DATE,
+    due_date_nova     DATE,
     justificativa     TEXT        NOT NULL,
     criado_em         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

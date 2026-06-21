@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AtSign, Bookmark, Paperclip, Plus, X } from 'lucide-react'
 import api from '@/api'
+import { Alert } from '@/components/ui/alert'
 import { UserAvatar } from '@/components/app/UserAvatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,28 +14,74 @@ import { Progress } from '@/components/ui/progress'
 import { Select } from '@/components/ui/select'
 import { Textarea } from '@/components/ui/textarea'
 import EstimateDifficultyModal from '@/modals/EstimateDifficultyModal'
+import { getErrorMessage } from '@/lib/errors'
 import { cn } from '@/lib/utils'
-import type { BoardColumn, ChecklistItem, Comentario, Prioridade, ProjectMember, Task } from '@/types'
+import type { ChecklistItem, Comentario, Prioridade, ProjectMember, Task } from '@/types'
 
 type ActivityTab = 'comments' | 'subtasks'
 
-interface CardDetailModalProps { cardId: number | null; canManage?: boolean; onClose: () => void }
+interface CardDetailModalProps { cardId: number | null; canManage?: boolean; currentUserId?: number; onClose: () => void }
 
-export default function CardDetailModal({ cardId, canManage = false, onClose }: CardDetailModalProps) {
+export default function CardDetailModal({ cardId, canManage = false, currentUserId, onClose }: CardDetailModalProps) {
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<ActivityTab>('comments')
   const [comment, setComment] = useState('')
   const [newItem, setNewItem] = useState('')
   const [showEstimate, setShowEstimate] = useState(false)
   const [editingCardId, setEditingCardId] = useState<number | null>(null)
-  const [editForm, setEditForm] = useState({ titulo: '', descricao: '', prioridade: 'MEDIA' as Prioridade, responsavelId: '', dueDate: '', estimate: '', colunaId: '' })
+  const [saveError, setSaveError] = useState('')
+  const [editForm, setEditForm] = useState({ titulo: '', descricao: '', criteriosAceitacao: '', prioridade: 'MEDIA' as Prioridade, responsavelId: '', dueDate: '', estimate: '' })
   const { data: task, isLoading } = useQuery({ queryKey: ['task', cardId], queryFn: () => api.get<Task>(`/cards/${cardId}/`).then((response) => response.data), enabled: Boolean(cardId) })
   const { data: members = [] } = useQuery({ queryKey: ['project-members', task?.projeto_id], queryFn: () => api.get<ProjectMember[]>(`/projetos/${task?.projeto_id}/membros/`).then((response) => response.data), enabled: canManage && Boolean(task?.projeto_id) })
-  const { data: columns = [] } = useQuery({ queryKey: ['project-columns', task?.projeto_id], queryFn: () => api.get<BoardColumn[]>(`/projetos/${task?.projeto_id}/colunas/`).then((response) => response.data), enabled: canManage && Boolean(task?.projeto_id) })
   const { data: comments = [] } = useQuery({ queryKey: ['task-comments', cardId], queryFn: () => api.get<ApiComment[]>(`/cards/${cardId}/comentarios/`).then((response) => response.data.map(normalizeComment)), enabled: Boolean(cardId) })
   const { data: checklist = [] } = useQuery({ queryKey: ['task-checklist', cardId], queryFn: () => api.get<ApiChecklist[]>(`/cards/${cardId}/checklists/`).then((response) => response.data.flatMap((checklistGroup) => checklistGroup.itens.map((item) => ({ id: item.id, task_id: cardId ?? 0, titulo: item.texto, concluido: item.concluido })))), enabled: Boolean(cardId) })
 
   const editing = Boolean(cardId && editingCardId === cardId)
+  const saveCardMutation = useMutation({
+    mutationFn: () => {
+      if (!cardId) throw new Error('Card não selecionado.')
+      const payload: CardPatchPayload = {
+        titulo: editForm.titulo.trim(),
+        descricao: editForm.descricao,
+        criterios_aceitacao: editForm.criteriosAceitacao,
+        prioridade: editForm.prioridade,
+        responsavel_id: editForm.responsavelId ? Number(editForm.responsavelId) : null,
+        estimativa_consolidada: editForm.estimate ? Number(editForm.estimate) : null,
+      }
+      if (task && editForm.dueDate !== (task.due_date ?? '')) {
+        payload.due_date = editForm.dueDate || null
+        payload.justificativa_prazo = 'Ajuste feito pelo gerente no detalhe do card.'
+      }
+      return api.patch<Task>(`/cards/${cardId}/`, payload).then((response) => response.data)
+    },
+    onMutate: () => {
+      setSaveError('')
+    },
+    onSuccess: async () => {
+      setEditingCardId(null)
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['task', cardId], type: 'active' }),
+        queryClient.invalidateQueries({ queryKey: ['board'] }),
+        queryClient.invalidateQueries({ queryKey: ['backlog'] }),
+      ])
+    },
+    onError: (error) => {
+      setSaveError(getErrorMessage(error, 'Não foi possível salvar as alterações do card.'))
+    },
+  })
+  const assignToMeMutation = useMutation({
+    mutationFn: () => {
+      if (!cardId || !currentUserId) throw new Error('Usuário ou card não selecionado.')
+      return api.patch<Task>(`/cards/${cardId}/`, { responsavel_id: currentUserId }).then((response) => response.data)
+    },
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.refetchQueries({ queryKey: ['task', cardId], type: 'active' }),
+        queryClient.invalidateQueries({ queryKey: ['board'] }),
+        queryClient.invalidateQueries({ queryKey: ['backlog'] }),
+      ])
+    },
+  })
 
   const addComment = async () => {
     if (!cardId || !comment.trim()) return
@@ -57,24 +104,12 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
     await queryClient.invalidateQueries({ queryKey: ['task-checklist', cardId] })
   }
 
-  const saveCard = async () => {
-    if (!cardId) return
-    await api.patch(`/cards/${cardId}/`, {
-      titulo: editForm.titulo.trim(),
-      descricao: editForm.descricao,
-      prioridade: editForm.prioridade,
-      responsavel_id: editForm.responsavelId ? Number(editForm.responsavelId) : null,
-      due_date: editForm.dueDate || null,
-      estimativa_consolidada: editForm.estimate ? Number(editForm.estimate) : null,
-      coluna_id: editForm.colunaId ? Number(editForm.colunaId) : undefined,
-      justificativa_prazo: 'Ajuste feito pelo gerente no detalhe do card.',
-    })
-    setEditingCardId(null)
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['task', cardId] }),
-      queryClient.invalidateQueries({ queryKey: ['board'] }),
-      queryClient.invalidateQueries({ queryKey: ['backlog'] }),
-    ])
+  const saveCard = () => {
+    if (!editForm.titulo.trim()) {
+      setSaveError('Título é obrigatório.')
+      return
+    }
+    saveCardMutation.mutate()
   }
 
   const completed = checklist.filter((item) => item.concluido).length
@@ -88,13 +123,13 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
             <DialogTitle className="sr-only">Detalhes do card {task.codigo}</DialogTitle><DialogDescription className="sr-only">Detalhes, comentários e subtarefas do card.</DialogDescription>
             <div className="grid h-full min-h-0 md:grid-cols-2">
               <section className="overflow-y-auto bg-card p-8">
-                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canManage && <Button size="sm" variant="outline" onClick={() => { if (editing) { setEditingCardId(null); return } setEditForm(formFromTask(task)); setEditingCardId(task.id) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
+                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canManage && <Button size="sm" variant="outline" onClick={() => { setSaveError(''); if (editing) { setEditingCardId(null); return } setEditForm(formFromTask(task)); setEditingCardId(task.id) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
                 <h2 className="mb-8 text-2xl font-bold leading-tight text-card-foreground">{task.titulo}</h2>
-                {editing && <EditCardForm form={editForm} members={members} columns={columns} onChange={setEditForm} onSave={saveCard} />}
+                {editing && <EditCardForm form={editForm} members={members} isSaving={saveCardMutation.isPending} error={saveError} onChange={setEditForm} onSave={saveCard} />}
                 <div className="mb-8 grid grid-cols-2 gap-x-8 gap-y-7">
                   <Meta label="Status"><Badge variant="info">• {statusLabel(task.status)}</Badge></Meta>
                   <Meta label="Prioridade"><span className="font-semibold text-primary">⌃ {priorityLabel(task.prioridade)}</span></Meta>
-                  <Meta label="Responsável">{task.responsavel_nome ? <span className="flex items-center gap-2 font-semibold"><UserAvatar name={task.responsavel_nome} className="h-8 w-8" />{task.responsavel_nome}</span> : <span className="text-muted-foreground">Não atribuído</span>}</Meta>
+                  <Meta label="Responsável">{task.responsavel_nome ? <span className="flex items-center gap-2 font-semibold"><UserAvatar name={task.responsavel_nome} className="h-8 w-8" />{task.responsavel_nome}</span> : <span className="flex flex-wrap items-center gap-2 text-muted-foreground">Não atribuído{currentUserId && <Button size="sm" variant="outline" disabled={assignToMeMutation.isPending} onClick={() => assignToMeMutation.mutate()}>{assignToMeMutation.isPending ? 'Assumindo...' : 'Assumir task'}</Button>}</span>}</Meta>
                   <Meta label="Estimativa"><div className="flex items-center gap-3">{task.estimativa_consolidada ? <><strong>{task.estimativa_consolidada} Pontos</strong>{canManage && <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>Alterar</Button>}</> : task.pronto_para_estimativa ? <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>{canManage ? 'Fechar Planning Poker' : 'Estimar dificuldade'}</Button> : canManage ? <Button size="sm" variant="secondary" className="text-primary" onClick={() => setShowEstimate(true)}>Definir estimativa</Button> : <span className="text-muted-foreground">Não estimada</span>}</div></Meta>
                 </div>
                 <DetailSection title="Descrição"><p>{task.descricao || 'Sem descrição.'}</p></DetailSection>
@@ -123,40 +158,52 @@ export default function CardDetailModal({ cardId, canManage = false, onClose }: 
 type EditCardFormState = {
   titulo: string
   descricao: string
+  criteriosAceitacao: string
   prioridade: Prioridade
   responsavelId: string
   dueDate: string
   estimate: string
-  colunaId: string
+}
+
+type CardPatchPayload = {
+  titulo: string
+  descricao: string
+  criterios_aceitacao: string
+  prioridade: Prioridade
+  responsavel_id: number | null
+  due_date?: string | null
+  estimativa_consolidada: number | null
+  justificativa_prazo?: string
 }
 
 function formFromTask(task: Task): EditCardFormState {
   return {
     titulo: task.titulo,
     descricao: task.descricao ?? '',
+    criteriosAceitacao: task.criterios_aceitacao ?? '',
     prioridade: task.prioridade,
     responsavelId: task.responsavel_id ? String(task.responsavel_id) : '',
     dueDate: task.due_date ?? '',
     estimate: task.estimativa_consolidada ? String(task.estimativa_consolidada) : '',
-    colunaId: task.coluna_id ? String(task.coluna_id) : '',
   }
 }
 
-function EditCardForm({ form, members, columns, onChange, onSave }: { form: EditCardFormState; members: ProjectMember[]; columns: BoardColumn[]; onChange: (form: EditCardFormState) => void; onSave: () => Promise<void> }) {
+function EditCardForm({ form, members, isSaving, error, onChange, onSave }: { form: EditCardFormState; members: ProjectMember[]; isSaving: boolean; error: string; onChange: (form: EditCardFormState) => void; onSave: () => void }) {
   return (
     <div className="mb-8 space-y-4 rounded-lg border border-border bg-muted p-4">
+      {error && <Alert variant="destructive">{error}</Alert>}
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Título"><Input value={form.titulo} onChange={(event) => onChange({ ...form, titulo: event.target.value })} /></Field>
         <Field label="Prioridade"><Select value={form.prioridade} onChange={(event) => onChange({ ...form, prioridade: event.target.value as Prioridade })}><option value="BAIXA">Baixa</option><option value="MEDIA">Média</option><option value="ALTA">Alta</option><option value="URGENTE">Urgente</option></Select></Field>
       </div>
       <Field label="Descrição"><Textarea className="min-h-24" value={form.descricao} onChange={(event) => onChange({ ...form, descricao: event.target.value })} /></Field>
+      <Field label="Critérios de aceitação"><Textarea className="min-h-24" value={form.criteriosAceitacao} onChange={(event) => onChange({ ...form, criteriosAceitacao: event.target.value })} placeholder="- Critério esperado" /></Field>
       <div className="grid gap-4 sm:grid-cols-2">
         <Field label="Responsável"><Select value={form.responsavelId} onChange={(event) => onChange({ ...form, responsavelId: event.target.value })}><option value="">Não atribuído</option>{members.map((member) => <option key={member.id} value={member.id}>{member.nome}</option>)}</Select></Field>
-        <Field label="Coluna"><Select value={form.colunaId} onChange={(event) => onChange({ ...form, colunaId: event.target.value })}>{columns.map((column) => <option key={column.id} value={column.id}>{column.nome}</option>)}</Select></Field>
         <Field label="Prazo"><Input type="date" value={form.dueDate} onChange={(event) => onChange({ ...form, dueDate: event.target.value })} /></Field>
         <Field label="Estimativa"><Select value={form.estimate} onChange={(event) => onChange({ ...form, estimate: event.target.value })}><option value="">Não estimada</option>{[1, 2, 3, 5, 8, 13, 21].map((value) => <option key={value} value={value}>{value} pontos</option>)}</Select></Field>
       </div>
-      <div className="flex justify-end"><Button type="button" onClick={() => void onSave()}>Salvar alterações</Button></div>
+      <div className="flex justify-end"><Button type="button" disabled={isSaving} onClick={onSave}>{isSaving ? 'Salvando...' : 'Salvar alterações'}</Button></div>
     </div>
   )
 }

@@ -177,15 +177,29 @@ sprint.
 entering a sprint is the point where execution-specific fields may need
 confirmation.
 
-### Card editing before drag-and-drop
+### Card editing and Board movement
 
 **Decision:** `GERENTE` can edit title, description, priority, responsible,
-deadline, estimate and board column from the card detail modal. Drag-and-drop
-movement remains a later UI improvement.
+acceptance criteria, deadline and estimate from the card detail modal. Column
+changes are centralized in the Board through drag-and-drop with `dnd-kit`.
+Any project member can assume an unassigned card. The assigned user can move
+their own card between columns.
 
 **Reason:** The backend already exposes the stable `PATCH /cards/<id>/`
-contract. Using it from the existing modal fixes the actual workflow with much
-less frontend entropy than adding drag-and-drop state management at this stage.
+contract. Keeping column movement in one place avoids duplicated controls and
+keeps the card detail focused on card data instead of board positioning.
+Allowing the responsible user to move their card matches normal task execution
+without giving broad edit permissions.
+
+### Backlog to sprint movement
+
+**Decision:** A backlog card can be moved to the active sprint through
+`PATCH /cards/<id>/` with `sprint_id`; the backend always places it in the
+initial `To do` column.
+
+**Reason:** This keeps the rule centralized and avoids a second endpoint for a
+single state transition. A later dedicated review dialog can refine sprint
+specific fields without changing the core contract.
 
 ### Invite activation name and session duration
 
@@ -208,6 +222,26 @@ and keeps future design changes centralized.
 
 **Reason:** This matches the documented short-polling architecture and allows
 the same presentation components to work with demo and real API adapters.
+Card movement uses one narrow optimistic cache update because it is a frequent,
+low-risk interaction. Other edits stay with mutation plus refetch/invalidation
+to keep the frontend simpler.
+
+### Nullable due date history
+
+**Decision:** `justificativas_prazo.due_date_anterior` and `due_date_nova` allow
+null values.
+
+**Reason:** A manager can set the first deadline or remove an existing deadline.
+The audit row must represent those transitions without causing a server error.
+
+### Board density and centering
+
+**Decision:** The Board uses a centered content wrapper and responsive card
+widths with a sensible maximum instead of stretching indefinitely.
+
+**Reason:** The board should use the available screen space without making cards
+too wide on large monitors, and the layout should stay visually centered when
+there is extra room.
 
 ### No global notification bell
 

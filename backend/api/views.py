@@ -11,6 +11,7 @@ from django.core.validators import validate_email
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q, Count
+from django.utils.dateparse import parse_date
 from django.utils import timezone
 
 from rest_framework.decorators import api_view, permission_classes
@@ -1418,6 +1419,29 @@ def card_detail(request, card_id):
         card.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    is_manager = request.user.admin or cargo == 'GERENTE'
+    is_assignee = card.responsavel_id == request.user.id
+    simple_fields_requested = any(campo in request.data for campo in [
+        'titulo', 'descricao', 'criterios_aceitacao', 'prioridade',
+        'passos_reproducao', 'resultado_esperado', 'due_date',
+        'estimativa_consolidada', 'sprint_id',
+    ])
+    column_requested = 'coluna_id' in request.data
+    responsible_requested = 'responsavel_id' in request.data
+
+    if simple_fields_requested and not is_manager:
+        return Response({'detail': 'Apenas Gerentes podem editar dados do card.'}, status=status.HTTP_403_FORBIDDEN)
+    if column_requested and not (is_manager or is_assignee):
+        return Response({'detail': 'Apenas Gerentes ou o responsável podem mover o card.'}, status=status.HTTP_403_FORBIDDEN)
+    if responsible_requested and not is_manager:
+        requested_responsavel = request.data['responsavel_id']
+        try:
+            requested_responsavel_id = int(requested_responsavel)
+        except (TypeError, ValueError):
+            requested_responsavel_id = None
+        if card.responsavel_id is not None or requested_responsavel_id != request.user.id:
+            return Response({'detail': 'Você só pode assumir cards sem responsável.'}, status=status.HTTP_403_FORBIDDEN)
+
     # PATCH — 'status' NÃO entra (property derivada). Use 'coluna_id'.
     campos_simples = ['titulo', 'descricao', 'criterios_aceitacao', 'prioridade',
                       'passos_reproducao', 'resultado_esperado']
@@ -1430,13 +1454,32 @@ def card_detail(request, card_id):
                     return Response({'detail': 'prioridade deve ser BAIXA, MEDIA, ALTA ou URGENTE.'}, status=status.HTTP_400_BAD_REQUEST)
             setattr(card, campo, valor)
 
+    if 'sprint_id' in request.data:
+        sprint_id = request.data['sprint_id']
+        if sprint_id in (None, ''):
+            card.sprint = None
+            _registrar_historico(card, request.user, 'MUDANCA_SPRINT', 'Card movido para backlog.')
+        else:
+            try:
+                nova_sprint = Sprint.objects.get(pk=sprint_id, projeto=projeto)
+            except Sprint.DoesNotExist:
+                return Response({'detail': 'Sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            if nova_sprint.status != 'ATIVA':
+                return Response({'detail': 'Cards só podem entrar em sprint ativa.'}, status=status.HTTP_400_BAD_REQUEST)
+            coluna_inicial = _coluna_inicial(projeto)
+            if coluna_inicial is None:
+                return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+            card.sprint = nova_sprint
+            card.coluna = coluna_inicial
+            _registrar_historico(card, request.user, 'MUDANCA_SPRINT', f'Card movido para {nova_sprint.nome}.')
+
     if 'coluna_id' in request.data:
         try:
             nova_coluna = ColunasBoard.objects.get(pk=request.data['coluna_id'], projeto=projeto)
         except ColunasBoard.DoesNotExist:
             return Response({'detail': 'Coluna não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if card.coluna and card.coluna.nome == COLUNA_VALIDACAO_NOME:
+        if card.coluna and card.coluna.nome == COLUNA_VALIDACAO_NOME and not is_assignee:
             if cargo not in ('QA', 'GERENTE') and not request.user.admin:
                 return Response(
                     {'detail': 'Apenas QA ou Gerentes podem mover cards para fora de Validação.'},
@@ -1465,7 +1508,11 @@ def card_detail(request, card_id):
                 return Response({'detail': 'Responsável não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     if 'due_date' in request.data:
-        if card.sprint and card.sprint.status == 'ATIVA':
+        novo_due_date_raw = request.data['due_date'] or None
+        novo_due_date = parse_date(novo_due_date_raw) if isinstance(novo_due_date_raw, str) else novo_due_date_raw
+        if novo_due_date_raw and novo_due_date is None:
+            return Response({'detail': 'due_date deve usar o formato YYYY-MM-DD.'}, status=status.HTTP_400_BAD_REQUEST)
+        if card.sprint and card.sprint.status == 'ATIVA' and card.due_date != novo_due_date:
             justificativa = request.data.get('justificativa_prazo', '').strip()
             if not justificativa:
                 return Response(
@@ -1478,9 +1525,9 @@ def card_detail(request, card_id):
                 usuario=request.user,
                 justificativa=justificativa,
                 due_date_anterior=card.due_date,
-                due_date_nova=request.data['due_date'],
+                due_date_nova=novo_due_date,
             )
-        card.due_date = request.data['due_date']
+        card.due_date = novo_due_date
 
     if 'estimativa_consolidada' in request.data:
         valor = request.data['estimativa_consolidada']

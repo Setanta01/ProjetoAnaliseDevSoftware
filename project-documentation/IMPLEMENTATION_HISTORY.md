@@ -122,6 +122,29 @@ All three quality commands passed at the end of this implementation pass.
 * Added `wipe_db_state0` for restoring a disposable local PostgreSQL database to
   first boot without recreating the container or schema.
 
+## Sprint 2 Card Flow Stabilization - 2026-06-21
+
+* Added backend support for moving a backlog card into an active sprint through
+  `PATCH /api/cards/<id>/` with `sprint_id`, placing it in `To do`.
+* Restricted card edit `PATCH` to admin or project `GERENTE`, matching the
+  documented usage flow.
+* Added backlog actions to move cards to the active sprint or remove them.
+* Added `dnd-kit` drag-and-drop movement in the Board as the only frontend
+  column movement control.
+* Adjusted movement permissions so assigned users can move their own cards and
+  any member can assume an unassigned card.
+* Converted card edit save to a React Query mutation with visible API errors,
+  so failed saves no longer look like an inert button.
+* Added a narrow optimistic cache update for Board column movement and kept
+  normal invalidation/refetch for broader card edits.
+* Added a centered Board wrapper with responsive column widths so the board
+  fills available space without making cards too wide.
+* Removed column editing from the card detail modal to avoid duplicated movement
+  paths.
+* Added acceptance criteria to the card edit form.
+* Added a migration allowing deadline history rows to represent setting or
+  clearing an optional deadline.
+
 ## Known Visual Differences
 
 * Some font metrics and spacing differ slightly from the raster prototype.

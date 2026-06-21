@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Filter, MoreVertical, Plus } from 'lucide-react'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronLeft, ChevronRight, Filter, MoreVertical, Plus, Trash2 } from 'lucide-react'
 import api from '@/api'
 import { DataPanel } from '@/components/app/DataPanel'
 import { EmptyState } from '@/components/app/EmptyState'
@@ -15,19 +15,45 @@ import type { Task } from '@/types'
 
 interface BacklogViewProps {
   projetoId: number | null
+  activeSprintId?: number
   onNewCard: () => void
   onOpenCard: (id: number) => void
   canManage: boolean
 }
 
-export default function BacklogView({ projetoId, onNewCard, onOpenCard, canManage }: BacklogViewProps) {
+export default function BacklogView({ projetoId, activeSprintId, onNewCard, onOpenCard, canManage }: BacklogViewProps) {
+  const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['backlog', projetoId],
     queryFn: () => api.get<Task[]>(`/projetos/${projetoId}/backlog/`).then((response) => response.data),
     enabled: Boolean(projetoId),
   })
+  const moveToSprint = useMutation({
+    mutationFn: (taskId: number) => api.patch<Task>(`/cards/${taskId}/`, { sprint_id: activeSprintId }).then((response) => response.data),
+    onSuccess: async (_task, taskId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['backlog', projetoId] }),
+        queryClient.invalidateQueries({ queryKey: ['board', activeSprintId] }),
+        queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      ])
+    },
+  })
+  const deleteCard = useMutation({
+    mutationFn: (taskId: number) => api.delete(`/cards/${taskId}/`),
+    onSuccess: async (_response, taskId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['backlog', projetoId] }),
+        queryClient.invalidateQueries({ queryKey: ['task', taskId] }),
+      ])
+    },
+  })
   const filteredTasks = tasks.filter((task) => task.titulo.toLowerCase().includes(search.toLowerCase()))
+
+  const confirmDelete = (task: Task) => {
+    if (!window.confirm(`Remover a task "${task.titulo}"? Esta ação não pode ser desfeita.`)) return
+    deleteCard.mutate(task.id)
+  }
 
   return (
     <PageContainer className="flex flex-col">
@@ -44,7 +70,16 @@ export default function BacklogView({ projetoId, onNewCard, onOpenCard, canManag
                   <TableCell className="font-semibold text-card-foreground">{task.titulo}</TableCell>
                   <TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell>
                   <TableCell className="text-muted-foreground">{task.estimativa_consolidada ?? '-'}</TableCell>
-                  <TableCell className="text-right"><Button variant="ghost" size="icon" aria-label="Mais ações"><MoreVertical className="h-4 w-4" /></Button></TableCell>
+                  <TableCell className="text-right">
+                    {canManage ? (
+                      <div className="flex justify-end gap-2">
+                        {activeSprintId && <Button variant="outline" size="sm" disabled={moveToSprint.isPending} onClick={(event) => { event.stopPropagation(); moveToSprint.mutate(task.id) }}>Mover para To do</Button>}
+                        <Button variant="dangerSoft" size="icon" disabled={deleteCard.isPending} aria-label="Remover task" onClick={(event) => { event.stopPropagation(); confirmDelete(task) }}><Trash2 className="h-4 w-4" /></Button>
+                      </div>
+                    ) : (
+                      <Button variant="ghost" size="icon" aria-label="Mais ações" disabled><MoreVertical className="h-4 w-4" /></Button>
+                    )}
+                  </TableCell>
                 </TableRow>
               ))}</TableBody>
             </Table>

@@ -105,8 +105,8 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
         <Route path="projects" element={<MyProjectsView onSelect={selectProject} />} />
         {profile.admin && <Route path="admin/projects" element={<AdminProjectsView />} />}
         {profile.admin && <Route path="admin/invitations" element={<AdminInvitationsView />} />}
-        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('sprint')} canManage={canManageProject} />} />
-        <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('backlog')} canManage={canManageProject} />} />
+        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('sprint')} canManage={canManageProject} currentUserId={profile.id} />} />
+        <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} activeSprintId={activeSprint?.id} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('backlog')} canManage={canManageProject} />} />
         <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} canManage={canManageProject} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} canManage={canManageProject} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route index element={<Navigate to="projects" replace />} />
@@ -114,7 +114,7 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
       </Routes>
 
       {createCardTarget && projectId && <CreateCardModal projetoId={projectId} sprintId={createCardTarget === 'sprint' ? activeSprint?.id : undefined} mode={createCardTarget} onClose={() => setCreateCardTarget(null)} onSuccess={() => void refreshTasks()} />}
-      <CardDetailModal cardId={selectedCardId} canManage={canManageProject} onClose={() => { setSelectedCardId(null); void refreshTasks() }} />
+      <CardDetailModal cardId={selectedCardId} canManage={canManageProject} currentUserId={profile.id} onClose={() => { setSelectedCardId(null); void refreshTasks() }} />
       <MfaSettingsModal open={showMfaSettings} onOpenChange={setShowMfaSettings} onStatusChange={(active, type) => { const nextProfile = { ...profile, mfa_ativo: active, mfa_tipo: type }; setProfile(nextProfile); onProfileChange(nextProfile) }} />
     </AppShell>
   )
