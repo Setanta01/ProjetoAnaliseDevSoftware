@@ -182,6 +182,7 @@ def _serializar_card(card, tem_novidade=False):
         'tipo': card.tipo,
         'prioridade': card.prioridade,
         'status': _status_card(card),
+        'projeto_id': card.projeto_id,
         'coluna_id': card.coluna_id,
         'coluna_nome': card.coluna.nome if card.coluna else None,
         'sprint_id': card.sprint_id,

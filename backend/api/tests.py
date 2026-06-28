@@ -486,6 +486,34 @@ class Sprint3BacklogRuleTests(TestCase):
 
         self.assertIsNone(response)
 
+    def test_card_serializer_includes_project_id_for_member_queries(self):
+        card = SimpleNamespace(
+            id=77,
+            codigo='ABCD',
+            titulo='Card com membros',
+            descricao='',
+            criterios_aceitacao='',
+            tipo='TAREFA',
+            prioridade='MEDIA',
+            coluna_id=1,
+            coluna=SimpleNamespace(nome='To do'),
+            sprint_id=11,
+            sprint=SimpleNamespace(data_inicio=None),
+            projeto_id=10,
+            responsavel_id=None,
+            responsavel=None,
+            due_date=None,
+            estimativa_consolidada=None,
+            impedido=False,
+            pronto_para_estimativa=False,
+            criado_em=None,
+            atualizado_em=None,
+        )
+
+        data = views._serializar_card(card)
+
+        self.assertEqual(data['projeto_id'], 10)
+
 
 class MfaFlowTests(TestCase):
     def setUp(self):
