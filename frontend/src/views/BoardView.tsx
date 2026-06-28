@@ -10,7 +10,7 @@ import { ViewToggle, type ViewMode } from '@/components/app/ViewToggle'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import type { SprintDetail, Task } from '@/types'
+import type { ProjectRole, SprintDetail, Task } from '@/types'
 
 interface BoardViewProps {
   sprintId: number | null
@@ -19,13 +19,18 @@ interface BoardViewProps {
   onNewCard: () => void
   canManage: boolean
   currentUserId?: number
+  currentRole?: ProjectRole | 'ADMIN'
 }
 
 const priorityWeight = { URGENTE: 4, ALTA: 3, MEDIA: 2, BAIXA: 1 } as const
+const VIEW_MODE_STORAGE_KEY = 'lazuli_board_view_mode'
 
-export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, currentUserId }: BoardViewProps) {
+export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, currentUserId, currentRole }: BoardViewProps) {
   const queryClient = useQueryClient()
-  const [viewMode, setViewMode] = useState<ViewMode>('kanban')
+  const [viewMode, setViewModeState] = useState<ViewMode>(() => {
+    const saved = localStorage.getItem(VIEW_MODE_STORAGE_KEY)
+    return saved === 'list' ? 'list' : 'kanban'
+  })
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const { data: sprint, isLoading } = useQuery({
@@ -83,6 +88,11 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, 
 
   const canMoveTask = (task?: Task) => Boolean(task && (canManage || task.responsavel_id === currentUserId))
 
+  const setViewMode = (nextMode: ViewMode) => {
+    localStorage.setItem(VIEW_MODE_STORAGE_KEY, nextMode)
+    setViewModeState(nextMode)
+  }
+
   const handleDragStart = (event: DragStartEvent) => {
     const taskId = event.active.data.current?.taskId
     setActiveTaskId(typeof taskId === 'number' ? taskId : null)
@@ -98,13 +108,14 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, 
   }
 
   const activeTask = activeTaskId ? tasks.find((task) => task.id === activeTaskId) : undefined
+  const canCreateCard = canManage || currentRole === 'QA' || currentRole === 'ADMIN'
 
   return (
     <main className="flex h-full flex-col overflow-hidden px-4 pt-5 xl:px-5">
       <div className="mx-auto flex h-full w-full max-w-[1700px] flex-col overflow-hidden">
         <header className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div><div className="mb-1 flex items-center gap-3"><Badge variant="info">Sprint Ativa</Badge></div><h1 className="text-3xl font-bold tracking-tight text-foreground">Board {sprint?.nome ?? ''}</h1></div>
-          <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button>{canManage && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button>}</div>
+          <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button>{canCreateCard && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> {currentRole === 'QA' && !canManage ? 'Novo Bug' : 'Nova Task'}</Button>}</div>
         </header>
         {isLoading ? (
           <LoadingState label="Carregando quadro..." />
@@ -118,7 +129,7 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, 
                 })}
               </div>
             </div>
-            <DragOverlay>{activeTask && <KanbanTaskCard task={activeTask} isOverlay onClick={() => undefined} />}</DragOverlay>
+            <DragOverlay dropAnimation={null}>{activeTask && <KanbanTaskCard task={activeTask} isOverlay onClick={() => undefined} />}</DragOverlay>
           </DndContext>
         ) : (
           <div className="mb-6 flex-1 overflow-y-auto rounded-lg border border-border bg-card"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Título</TableHead><TableHead>Tipo</TableHead><TableHead>Prioridade</TableHead><TableHead>Coluna</TableHead><TableHead>Pontos</TableHead></TableRow></TableHeader><TableBody className="[&_tr:last-child]:border-b">{sortedTasks.map((task) => <TableRow key={task.id} className="cursor-pointer border-border" onClick={() => void openCard(task.id)}><TableCell className="font-mono text-muted-foreground">{task.codigo ?? `#${task.id}`}</TableCell><TableCell className="font-semibold">{task.titulo}</TableCell><TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell><TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell><TableCell>{task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status}</TableCell><TableCell>{task.estimativa_consolidada ?? '-'}</TableCell></TableRow>)}</TableBody></Table></div>

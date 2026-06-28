@@ -10,7 +10,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import type { Projeto } from '@/types'
 
 export default function MyProjectsView({ onSelect }: { onSelect: (project: Projeto) => void }) {
-  const { data: projects = [], isLoading } = useQuery({ queryKey: ['my-projects'], queryFn: () => api.get<Projeto[]>('/projetos/').then((response) => response.data) })
+  const { data: projects = [], isLoading } = useQuery({ queryKey: ['my-projects'], queryFn: () => api.get<Projeto[]>('/projetos/').then((response) => response.data), refetchOnWindowFocus: 'always', refetchInterval: 30000 })
 
   return (
     <PageContainer wide className="max-w-6xl">

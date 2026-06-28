@@ -11,7 +11,7 @@ import { SearchField } from '@/components/app/SearchField'
 import { PriorityBadge } from '@/components/app/TaskBadges'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import type { Task } from '@/types'
+import type { ProjectRole, Task } from '@/types'
 
 interface BacklogViewProps {
   projetoId: number | null
@@ -19,15 +19,18 @@ interface BacklogViewProps {
   onNewCard: () => void
   onOpenCard: (id: number) => void
   canManage: boolean
+  currentRole?: ProjectRole | 'ADMIN'
 }
 
-export default function BacklogView({ projetoId, activeSprintId, onNewCard, onOpenCard, canManage }: BacklogViewProps) {
+export default function BacklogView({ projetoId, activeSprintId, onNewCard, onOpenCard, canManage, currentRole }: BacklogViewProps) {
   const queryClient = useQueryClient()
   const [search, setSearch] = useState('')
   const { data: tasks = [], isLoading } = useQuery({
     queryKey: ['backlog', projetoId],
     queryFn: () => api.get<Task[]>(`/projetos/${projetoId}/backlog/`).then((response) => response.data),
     enabled: Boolean(projetoId),
+    refetchOnWindowFocus: 'always',
+    refetchInterval: 10000,
   })
   const moveToSprint = useMutation({
     mutationFn: (taskId: number) => api.patch<Task>(`/cards/${taskId}/`, { sprint_id: activeSprintId }).then((response) => response.data),
@@ -49,6 +52,7 @@ export default function BacklogView({ projetoId, activeSprintId, onNewCard, onOp
     },
   })
   const filteredTasks = tasks.filter((task) => task.titulo.toLowerCase().includes(search.toLowerCase()))
+  const canCreateCard = canManage || currentRole === 'QA' || currentRole === 'ADMIN'
 
   const confirmDelete = (task: Task) => {
     if (!window.confirm(`Remover a task "${task.titulo}"? Esta ação não pode ser desfeita.`)) return
@@ -57,7 +61,7 @@ export default function BacklogView({ projetoId, activeSprintId, onNewCard, onOp
 
   return (
     <PageContainer className="flex flex-col">
-      <PageHeader title="Backlog de Tasks" subtitle="Gestão de tasks não atribuídas à sprint." actions={canManage ? <Button onClick={onNewCard}><Plus className="h-4 w-4" /> Nova Task</Button> : undefined} />
+      <PageHeader title="Backlog de Tasks" subtitle="Gestão de tasks não atribuídas à sprint." actions={canCreateCard ? <Button onClick={onNewCard}><Plus className="h-4 w-4" /> {currentRole === 'QA' && !canManage ? 'Novo Bug' : 'Nova Task'}</Button> : undefined} />
       <DataPanel className="flex flex-1 flex-col">
         <div className="flex items-center justify-between border-b border-border bg-muted p-4"><SearchField value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Buscar no backlog..." /><Button variant="outline"><Filter className="h-4 w-4" /> Filtros</Button></div>
         <div className="flex-1 overflow-x-auto">

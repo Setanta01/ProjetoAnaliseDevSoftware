@@ -47,6 +47,7 @@ export interface Task {
   responsavel_id?: number;
   responsavel_nome?: string;
   sprint_id?: number;
+  sprint_data_inicio?: string;
   projeto_id?: number;
   coluna_id?: number;
   coluna_nome?: string;
@@ -64,6 +65,13 @@ export interface Task {
   aguardando_qa?: boolean;
   passos_reproducao?: string;
   resultado_esperado?: string;
+  card_origem_id?: number | null;
+  bugs_gerados?: Array<{
+    id: number;
+    codigo?: string;
+    titulo: string;
+    status?: TaskStatus;
+  }>;
 }
 
 export interface Subtask {
@@ -85,6 +93,14 @@ export interface Comentario {
   texto: string;
   criado_em: string;
   editado_em?: string;
+  anexos?: Anexo[];
+}
+
+export interface Anexo {
+  id: number;
+  nome: string;
+  url: string;
+  mime_type?: string;
 }
 
 export interface ChecklistItem {
@@ -92,6 +108,25 @@ export interface ChecklistItem {
   task_id: number;
   titulo: string;
   concluido: boolean;
+}
+
+export interface CardHistorico {
+  id: number;
+  card_id?: number;
+  tipo: string;
+  detalhe?: string;
+  usuario_id?: number;
+  usuario_nome?: string;
+  criado_em: string;
+}
+
+export interface ValidacaoQA {
+  id: number;
+  resultado: "APROVADO" | "REPROVADO";
+  observacao?: string;
+  qa_id?: number;
+  qa_nome?: string;
+  criado_em: string;
 }
 
 export interface ProjectMember {

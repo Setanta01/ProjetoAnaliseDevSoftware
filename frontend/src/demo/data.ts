@@ -1,4 +1,4 @@
-import type { Cargo, ChecklistItem, Comentario, ProjectMember, Projeto, Sprint, Task, UserProfile } from '@/types'
+import type { CardHistorico, Cargo, ChecklistItem, Comentario, ProjectMember, Projeto, Sprint, Task, UserProfile, ValidacaoQA } from '@/types'
 
 export interface DemoProfile extends UserProfile {
   cargo: Cargo
@@ -10,6 +10,9 @@ export interface DemoDatabase {
   tasks: Task[]
   comments: Comentario[]
   checklistItems: ChecklistItem[]
+  history: CardHistorico[]
+  validations: Record<number, ValidacaoQA[]>
+  sprintSnapshots: Record<number, Task[]>
   members: Record<number, ProjectMember[]>
   mfa: { active: boolean; type: 'TOTP' | 'EMAIL' | null }
 }
@@ -62,6 +65,17 @@ const checklistItems: ChecklistItem[] = [
   { id: 4, task_id: 102, titulo: 'Tratar renovação de tokens (Refresh token)', concluido: false },
 ]
 
+const history: CardHistorico[] = [
+  { id: 1, card_id: 102, tipo: 'CRIACAO', detalhe: 'Card criado como TAREFA.', usuario_id: 2, usuario_nome: 'Marina Gerente', criado_em: '2026-06-09T14:00:00Z' },
+  { id: 2, card_id: 102, tipo: 'MUDANCA_COLUNA', detalhe: 'To do -> Review', usuario_id: 3, usuario_nome: 'Carlos Dev', criado_em: '2026-06-11T09:15:00Z' },
+]
+
+const validations: Record<number, ValidacaoQA[]> = {
+  106: [
+    { id: 1, resultado: 'REPROVADO', observacao: 'Falha no cenário de refresh token expirado.', qa_id: 4, qa_nome: 'Maria Santos', criado_em: '2026-06-11T11:30:00Z' },
+  ],
+}
+
 const members: Record<number, ProjectMember[]> = {
   1: [
     { id: 2, nome: 'Marina Gerente', email: 'marina@lazuli.demo', cargo: 'GERENTE' },
@@ -81,6 +95,9 @@ export function createDemoDatabase(): DemoDatabase {
     tasks: structuredClone(tasks),
     comments: structuredClone(comments),
     checklistItems: structuredClone(checklistItems),
+    history: structuredClone(history),
+    validations: structuredClone(validations),
+    sprintSnapshots: {},
     members: structuredClone(members),
     mfa: { active: false, type: null },
   }

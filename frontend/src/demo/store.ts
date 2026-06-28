@@ -1,6 +1,6 @@
 import type { AxiosAdapter, AxiosResponse, InternalAxiosRequestConfig } from 'axios'
 import { createDemoDatabase, type DemoDatabase } from '@/demo/data'
-import type { BoardColumn, ChecklistItem, Comentario, Prioridade, Projeto, Sprint, Task, TaskStatus, Usuario } from '@/types'
+import type { BoardColumn, ChecklistItem, Comentario, Prioridade, Projeto, Sprint, Task, TaskStatus, Usuario, ValidacaoQA } from '@/types'
 
 const STORAGE_KEY = 'lazuli_demo_database_v2'
 const DEMO_DELAY_MS = 180
@@ -9,7 +9,15 @@ function loadDatabase(): DemoDatabase {
   const saved = localStorage.getItem(STORAGE_KEY)
   if (!saved) return createDemoDatabase()
   try {
-    return JSON.parse(saved) as DemoDatabase
+    const parsed = JSON.parse(saved) as DemoDatabase
+    const fresh = createDemoDatabase()
+    return {
+      ...fresh,
+      ...parsed,
+      history: parsed.history ?? fresh.history,
+      validations: parsed.validations ?? fresh.validations,
+      sprintSnapshots: parsed.sprintSnapshots ?? fresh.sprintSnapshots,
+    }
   } catch {
     return createDemoDatabase()
   }
@@ -94,8 +102,15 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   const projectSprintsMatch = path.match(/^\/projetos\/(\d+)\/sprints$/)
   if (method === 'GET' && projectSprintsMatch) return response(config, structuredClone(database.sprints.filter((sprint) => sprint.projeto_id === Number(projectSprintsMatch[1]))))
   if (method === 'POST' && projectSprintsMatch) {
-    const payload = parsePayload<{ nome: string }>(config.data)
-    const sprint: Sprint = { id: nextId(database.sprints), nome: payload.nome, status: 'PLANEJADA', projeto_id: Number(projectSprintsMatch[1]), criado_em: new Date().toISOString() }
+    const payload = parsePayload<{ nome?: string }>(config.data || {})
+    const projectId = Number(projectSprintsMatch[1])
+    const projectSprints = database.sprints.filter((sprint) => sprint.projeto_id === projectId)
+    const maxIndex = projectSprints.reduce((current, sprint) => {
+      const match = /^Sprint\s+(\d+)$/i.exec(sprint.nome)
+      return match ? Math.max(current, Number(match[1])) : current
+    }, 0)
+    const nextIndex = (maxIndex || projectSprints.length) + 1
+    const sprint: Sprint = { id: nextId(database.sprints), nome: payload.nome || `Sprint ${String(nextIndex).padStart(2, '0')}`, status: 'PLANEJADA', projeto_id: projectId, criado_em: new Date().toISOString() }
     database.sprints.push(sprint)
     saveDatabase()
     return response(config, structuredClone(sprint), 201)
@@ -138,9 +153,10 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     const sprintId = Number(sprintDetailMatch[1])
     const sprint = database.sprints.find((item) => item.id === sprintId)
     if (!sprint) throw new Error('Sprint não encontrada no modo demonstração.')
-    const cards = database.tasks
-      .filter((task) => task.sprint_id === sprintId)
-      .map((task) => ({ ...task, coluna_id: task.coluna_id ?? columnIdForStatus(task.status), coluna_nome: task.coluna_nome ?? columnNameForStatus(task.status) }))
+    const sourceCards = sprint.status === 'ENCERRADA' && database.sprintSnapshots[sprintId]?.length
+      ? database.sprintSnapshots[sprintId]
+      : database.tasks.filter((task) => task.sprint_id === sprintId)
+    const cards = sourceCards.map((task) => ({ ...task, sprint_data_inicio: sprint.data_inicio, coluna_id: task.coluna_id ?? columnIdForStatus(task.status), coluna_nome: task.coluna_nome ?? columnNameForStatus(task.status) }))
     return response(config, { ...structuredClone(sprint), colunas: structuredClone(demoColumns), cards })
   }
   const sprintStartMatch = path.match(/^\/sprints\/(\d+)\/iniciar$/)
@@ -156,9 +172,11 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       database.tasks.forEach((task) => {
         if (task.sprint_id === previousSprint.id && task.status !== 'CONCLUIDO') {
           task.sprint_id = sprint.id
-          task.status = 'TODO'
-          task.coluna_id = 1
-          task.coluna_nome = 'To do'
+          if (task.status !== 'REVISAO') {
+            task.status = 'TODO'
+            task.coluna_id = 1
+            task.coluna_nome = 'To do'
+          }
         }
       })
     }
@@ -169,24 +187,44 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   if (method === 'POST' && sprintCloseMatch) {
     const sprint = database.sprints.find((item) => item.id === Number(sprintCloseMatch[1]))
     if (!sprint) throw new Error('Sprint não encontrada no modo demonstração.')
-    const payload = parsePayload<{ acao?: 'iniciar_planejada' | 'pausar'; proxima_sprint_id?: number; cards_para_sprint: number[] }>(config.data)
+    const payload = parsePayload<{ acao?: 'iniciar_planejada' | 'pausar'; proxima_sprint_id?: number; cards_para_backlog?: number[]; cards_para_sprint: number[] }>(config.data)
+    database.sprintSnapshots[sprint.id] = structuredClone(database.tasks.filter((task) => task.sprint_id === sprint.id))
     sprint.status = 'ENCERRADA'
     sprint.data_fim = new Date().toISOString().slice(0, 10)
     let nextSprint: Sprint | null = null
     if ((payload.acao ?? 'iniciar_planejada') === 'iniciar_planejada') {
       nextSprint = database.sprints.find((item) => item.id === payload.proxima_sprint_id && item.status === 'PLANEJADA') ?? null
-      if (!nextSprint) throw new Error('Crie uma sprint planejada antes de iniciar a próxima no modo demonstração.')
+      nextSprint ??= database.sprints.find((item) => item.projeto_id === sprint.projeto_id && item.status === 'PLANEJADA') ?? null
+      if (!nextSprint) {
+        const projectSprints = database.sprints.filter((item) => item.projeto_id === sprint.projeto_id)
+        const nextIndex = projectSprints.length + 1
+        nextSprint = { id: nextId(database.sprints), nome: `Sprint ${String(nextIndex).padStart(2, '0')}`, status: 'PLANEJADA', projeto_id: sprint.projeto_id, criado_em: new Date().toISOString() }
+        database.sprints.push(nextSprint)
+      }
       nextSprint.status = 'ATIVA'
       nextSprint.data_inicio = new Date().toISOString().slice(0, 10)
       database.tasks.forEach((task) => {
         if (payload.cards_para_sprint.includes(task.id)) {
           task.sprint_id = nextSprint?.id
-          task.status = 'TODO'
-          task.coluna_id = 1
-          task.coluna_nome = 'To do'
+          if (task.status !== 'REVISAO') {
+            task.status = 'TODO'
+            task.coluna_id = 1
+            task.coluna_nome = 'To do'
+          }
         }
       })
     }
+    database.tasks.forEach((task) => {
+      if (payload.cards_para_backlog?.includes(task.id)) {
+        task.sprint_id = undefined
+        task.responsavel_id = undefined
+        task.responsavel_nome = undefined
+        task.due_date = undefined
+        task.estimativa_consolidada = undefined
+        task.pronto_para_estimativa = false
+        task.status = 'BACKLOG'
+      }
+    })
     saveDatabase()
     return response(config, { id: sprint.id, status: sprint.status, proxima_sprint: nextSprint })
   }
@@ -220,8 +258,25 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       return response(config, null, 204)
     }
     if (method === 'PATCH') {
-      const payload = parsePayload<Partial<Task> & { responsavel_id?: number | null; coluna_id?: number; sprint_id?: number; estimativa_consolidada?: number | null }>(config.data)
+      const payload = parsePayload<Partial<Task> & { responsavel_id?: number | null; coluna_id?: number; sprint_id?: number | null; estimativa_consolidada?: number | null }>(config.data)
+      if (!task.sprint_id && (payload.responsavel_id !== undefined || payload.due_date !== undefined || payload.estimativa_consolidada !== undefined || payload.coluna_id !== undefined)) {
+        throw new Error('Cards no backlog são sugestões; responsável, prazo, estimativa e coluna só são definidos na sprint.')
+      }
       Object.assign(task, payload)
+      if (payload.due_date === 'SPRINT_ATUAL') {
+        const sprint = database.sprints.find((item) => item.id === task.sprint_id)
+        task.due_date = sprint?.data_inicio ?? new Date().toISOString().slice(0, 10)
+      }
+      if (payload.due_date === null) task.due_date = undefined
+      if (payload.sprint_id === null) {
+        task.sprint_id = undefined
+        task.responsavel_id = undefined
+        task.responsavel_nome = undefined
+        task.due_date = undefined
+        task.estimativa_consolidada = undefined
+        task.pronto_para_estimativa = false
+        task.status = 'BACKLOG'
+      }
       if (payload.sprint_id) {
         task.sprint_id = payload.sprint_id
         task.coluna_id = 1
@@ -260,6 +315,8 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     const taskId = Number(commentsMatch[1])
     if (method === 'GET') return response(config, structuredClone(database.comments.filter((comment) => comment.task_id === taskId)))
     if (method === 'POST') {
+      const task = database.tasks.find((item) => item.id === taskId)
+      if (!task?.sprint_id) throw new Error('Cards no backlog são sugestões; mova para uma sprint antes de comentar.')
       const payload = parsePayload<{ texto: string }>(config.data)
       const comment: Comentario = { id: nextId(database.comments), task_id: taskId, usuario_id: 3, usuario_nome: 'Carlos Dev', texto: payload.texto, criado_em: new Date().toISOString() }
       database.comments.push(comment)
@@ -268,11 +325,61 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
     }
   }
 
+  const commentDetailMatch = path.match(/^\/cards\/comentarios\/(\d+)$/)
+  if (method === 'DELETE' && commentDetailMatch) {
+    const commentId = Number(commentDetailMatch[1])
+    database.comments = database.comments.filter((comment) => comment.id !== commentId)
+    saveDatabase()
+    return response(config, null, 204)
+  }
+
+  const commentAttachmentMatch = path.match(/^\/cards\/comentarios\/(\d+)\/anexos$/)
+  if (method === 'POST' && commentAttachmentMatch) {
+    const commentId = Number(commentAttachmentMatch[1])
+    const comment = database.comments.find((item) => item.id === commentId)
+    if (!comment) throw new Error('Comentário não encontrado no modo demonstração.')
+    const file = config.data instanceof FormData ? config.data.get('arquivo') as File | null : null
+    const nextAttachment = {
+      id: Date.now(),
+      nome: file?.name ?? 'anexo',
+      url: file ? URL.createObjectURL(file) : '#',
+      mime_type: file?.type,
+    }
+    comment.anexos = [...(comment.anexos ?? []), nextAttachment]
+    saveDatabase()
+    return response(config, nextAttachment, 201)
+  }
+
+  const historyMatch = path.match(/^\/cards\/(\d+)\/historico$/)
+  if (historyMatch) {
+    const taskId = Number(historyMatch[1])
+    if (method === 'GET') return response(config, structuredClone(database.history.filter((item) => item.card_id === taskId)))
+  }
+
+  const validationMatch = path.match(/^\/cards\/(\d+)\/validacao$/)
+  if (validationMatch) {
+    const taskId = Number(validationMatch[1])
+    database.validations[taskId] ??= []
+    if (method === 'GET') return response(config, structuredClone(database.validations[taskId]))
+    if (method === 'POST') {
+      const task = database.tasks.find((item) => item.id === taskId)
+      if (!task?.sprint_id) throw new Error('Cards no backlog são sugestões; mova para uma sprint antes de validar.')
+      const payload = parsePayload<Pick<ValidacaoQA, 'resultado' | 'observacao'>>(config.data)
+      const validation: ValidacaoQA = { id: nextId(database.validations[taskId]), resultado: payload.resultado, observacao: payload.observacao, qa_id: 4, qa_nome: 'Maria Santos', criado_em: new Date().toISOString() }
+      database.validations[taskId].push(validation)
+      database.history.push({ id: nextId(database.history), card_id: taskId, tipo: 'VALIDACAO_QA', detalhe: `Resultado: ${validation.resultado}`, usuario_id: 4, usuario_nome: 'Maria Santos', criado_em: validation.criado_em })
+      saveDatabase()
+      return response(config, structuredClone(validation), 201)
+    }
+  }
+
   const checklistMatch = path.match(/^\/(?:tasks\/(\d+)\/checklist|cards\/(\d+)\/checklists)$/)
   if (checklistMatch) {
     const taskId = Number(checklistMatch[1] ?? checklistMatch[2])
     if (method === 'GET') return response(config, [{ id: 1, titulo: 'Checklist do Desenvolvedor', itens: structuredClone(database.checklistItems.filter((item) => item.task_id === taskId).map((item) => ({ id: item.id, texto: item.titulo, concluido: item.concluido }))) }])
     if (method === 'POST') {
+      const task = database.tasks.find((item) => item.id === taskId)
+      if (!task?.sprint_id) throw new Error('Cards no backlog são sugestões; mova para uma sprint antes de editar checklist.')
       const payload = parsePayload<{ titulo: string }>(config.data)
       saveDatabase()
       return response(config, { id: 1, titulo: payload.titulo, itens: [] }, 201)
@@ -289,9 +396,14 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   }
 
   const checklistItemMatch = path.match(/^\/(?:tasks\/checklist|cards\/checklists\/itens)\/(\d+)$/)
-  if (method === 'PATCH' && checklistItemMatch) {
+  if ((method === 'PATCH' || method === 'DELETE') && checklistItemMatch) {
     const item = database.checklistItems.find((entry) => entry.id === Number(checklistItemMatch[1]))
     if (!item) throw new Error('Item não encontrado no modo demonstração.')
+    if (method === 'DELETE') {
+      database.checklistItems = database.checklistItems.filter((entry) => entry.id !== item.id)
+      saveDatabase()
+      return response(config, null, 204)
+    }
     Object.assign(item, parsePayload<Partial<ChecklistItem>>(config.data))
     saveDatabase()
     return response(config, structuredClone(item))
@@ -337,8 +449,14 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       estimativa_consolidada?: number
       pronto_para_estimativa?: boolean
       criterios_aceitacao?: string
+      passos_reproducao?: string
+      resultado_esperado?: string
+      card_origem_id?: number
     }>(config.data)
     const id = nextId(database.tasks)
+    if (!payload.sprint_id && (payload.responsavel_id || payload.due_date || payload.estimativa_consolidada || payload.pronto_para_estimativa)) {
+      throw new Error('Cards no backlog são sugestões; responsável, prazo e estimativa só são definidos na sprint.')
+    }
     const task: Task = {
       id,
       codigo: shortCode(id),
@@ -350,10 +468,13 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
       tipo: payload.tipo ?? 'TAREFA',
       responsavel_id: payload.responsavel_id,
       responsavel_nome: payload.responsavel_nome,
-      due_date: payload.due_date,
+      due_date: payload.due_date === 'SPRINT_ATUAL' ? database.sprints.find((sprint) => sprint.id === payload.sprint_id)?.data_inicio ?? new Date().toISOString().slice(0, 10) : payload.due_date,
       estimativa_consolidada: payload.estimativa_consolidada,
       pronto_para_estimativa: payload.pronto_para_estimativa,
       criterios_aceitacao: payload.criterios_aceitacao,
+      passos_reproducao: payload.passos_reproducao,
+      resultado_esperado: payload.resultado_esperado,
+      card_origem_id: payload.card_origem_id,
       status: payload.sprint_id ? 'TODO' : 'BACKLOG',
       criado_em: new Date().toISOString(),
     }

@@ -45,6 +45,7 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
   const { data: sprints = [] } = useQuery({ queryKey: ['project-sprints', projectId], queryFn: () => api.get<Sprint[]>(`/projetos/${projectId}/sprints/`).then((response) => response.data), enabled: Boolean(projectId) })
   const activeSprint = sprints.find((sprint) => sprint.status === 'ATIVA')
   const canManageProject = Boolean(profile.admin || project?.meu_cargo === 'GERENTE')
+  const projectRole = profile.admin ? 'ADMIN' : demoMode ? profile.cargo : project?.meu_cargo
 
   const globalNav: AppNavItem[] = [
     { label: 'Meus Projetos', to: '/app/projects', icon: LayoutGrid, section: 'global' },
@@ -105,16 +106,16 @@ export function DemoWorkspace({ initialProfile, onProfileChange, onExit, demoMod
         <Route path="projects" element={<MyProjectsView onSelect={selectProject} />} />
         {profile.admin && <Route path="admin/projects" element={<AdminProjectsView />} />}
         {profile.admin && <Route path="admin/invitations" element={<AdminInvitationsView />} />}
-        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('sprint')} canManage={canManageProject} currentUserId={profile.id} />} />
-        <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} activeSprintId={activeSprint?.id} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('backlog')} canManage={canManageProject} />} />
+        <Route path="projects/:projectId/board" element={<BoardView sprintId={activeSprint?.id ?? null} projetoId={projectId} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('sprint')} canManage={canManageProject} currentUserId={profile.id} currentRole={projectRole} />} />
+        <Route path="projects/:projectId/backlog" element={<BacklogView projetoId={projectId} activeSprintId={activeSprint?.id} onOpenCard={setSelectedCardId} onNewCard={() => setCreateCardTarget('backlog')} canManage={canManageProject} currentRole={projectRole} />} />
         <Route path="projects/:projectId/members" element={projectId ? <ProjectMembersView projectId={projectId} canManage={canManageProject} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route path="projects/:projectId/sprints" element={projectId ? <SprintHistoryView projectId={projectId} canManage={canManageProject} /> : <Navigate to={AUTHENTICATED_HOME} replace />} />
         <Route index element={<Navigate to="projects" replace />} />
         <Route path="*" element={<Navigate to="projects" replace />} />
       </Routes>
 
-      {createCardTarget && projectId && <CreateCardModal projetoId={projectId} sprintId={createCardTarget === 'sprint' ? activeSprint?.id : undefined} mode={createCardTarget} onClose={() => setCreateCardTarget(null)} onSuccess={() => void refreshTasks()} />}
-      <CardDetailModal cardId={selectedCardId} canManage={canManageProject} currentUserId={profile.id} onClose={() => { setSelectedCardId(null); void refreshTasks() }} />
+      {createCardTarget && projectId && <CreateCardModal projetoId={projectId} sprintId={createCardTarget === 'sprint' ? activeSprint?.id : undefined} mode={createCardTarget} currentRole={projectRole} onClose={() => setCreateCardTarget(null)} onSuccess={() => void refreshTasks()} />}
+      <CardDetailModal cardId={selectedCardId} canManage={canManageProject} currentUserId={profile.id} currentRole={projectRole} onClose={() => { setSelectedCardId(null); void refreshTasks() }} />
       <MfaSettingsModal open={showMfaSettings} onOpenChange={setShowMfaSettings} onStatusChange={(active, type) => { const nextProfile = { ...profile, mfa_ativo: active, mfa_tipo: type }; setProfile(nextProfile); onProfileChange(nextProfile) }} />
     </AppShell>
   )

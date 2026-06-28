@@ -25,7 +25,7 @@ export default function AdminProjectsView() {
   const queryClient = useQueryClient()
   const [searchTerm, setSearchTerm] = useState('')
   const [dialog, setDialog] = useState<ProjectDialog>(null)
-  const { data: projects = [], isLoading } = useQuery({ queryKey: ['admin-projects'], queryFn: () => api.get<Projeto[]>('/admin/projetos/').then((response) => response.data) })
+  const { data: projects = [], isLoading } = useQuery({ queryKey: ['admin-projects'], queryFn: () => api.get<Projeto[]>('/admin/projetos/').then((response) => response.data), refetchOnWindowFocus: 'always', refetchInterval: 30000 })
   const filteredProjects = projects.filter((project) => `${project.nome} ${project.descricao ?? ''}`.toLowerCase().includes(searchTerm.toLowerCase()))
   const refresh = async () => {
     await Promise.all([queryClient.invalidateQueries({ queryKey: ['admin-projects'] }), queryClient.invalidateQueries({ queryKey: ['my-projects'] })])

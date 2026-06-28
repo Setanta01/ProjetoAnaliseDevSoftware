@@ -21,14 +21,17 @@ export default function ProjectMembersView({ projectId, canManage }: { projectId
   const [cargo, setCargo] = useState<ProjectRole>('DEV')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const { data: members = [], isLoading } = useQuery({ queryKey: ['project-members', projectId], queryFn: () => api.get<ProjectMember[]>(`/projetos/${projectId}/membros/`).then((response) => response.data) })
-  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => api.get<Usuario[]>('/usuarios/').then((response) => response.data) })
+  const { data: members = [], isLoading } = useQuery({ queryKey: ['project-members', projectId], queryFn: () => api.get<ProjectMember[]>(`/projetos/${projectId}/membros/`).then((response) => response.data), refetchOnWindowFocus: 'always', refetchInterval: 30000 })
+  const { data: users = [] } = useQuery({ queryKey: ['users'], queryFn: () => api.get<Usuario[]>('/usuarios/').then((response) => response.data), refetchOnWindowFocus: 'always', refetchInterval: 60000 })
   const memberIds = new Set(members.map((member) => member.id))
   const availableUsers = users.filter((user) => user.ativo && !memberIds.has(user.id))
 
   const refresh = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['project-members', projectId] })
-    await queryClient.invalidateQueries({ queryKey: ['project', projectId] })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['project-members', projectId] }),
+      queryClient.invalidateQueries({ queryKey: ['project', projectId] }),
+      queryClient.refetchQueries({ queryKey: ['my-projects'] }),
+    ])
   }
 
   const addMember = async () => {
