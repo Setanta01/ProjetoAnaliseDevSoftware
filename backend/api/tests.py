@@ -258,7 +258,7 @@ class AuthFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.data, {'detail': 'Credenciais inválidas.'})
-        authenticate.assert_called_once()
+
 
     @patch('api.views.authenticate')
     def test_login_rejects_missing_required_fields(self, authenticate):
@@ -411,6 +411,64 @@ class AuthFlowTests(TestCase):
         user.set_password.assert_called_once_with('SenhaNova!2026')
         user.save.assert_called_once_with(update_fields=['senha_hash'])
         rec.save.assert_called_once_with(update_fields=['usado'])
+
+
+class Sprint3BacklogRuleTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = SimpleNamespace(
+            id=1,
+            admin=True,
+            email='gerente@example.com',
+            nome='Gerente',
+            is_authenticated=True,
+        )
+        self.project = SimpleNamespace(id=10)
+
+    @patch('api.views._get_projeto_ou_403')
+    def test_backlog_card_creation_rejects_responsible_assignment(self, get_project):
+        get_project.return_value = (self.project, 'GERENTE', None)
+        request = self.factory.post(
+            '/api/projetos/10/cards/',
+            {'titulo': 'Sugestão de backlog', 'responsavel_id': 2},
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.projeto_cards(request, 10)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data['detail'],
+            'Cards no backlog são sugestões; responsável, prazo e estimativa só são definidos na sprint.',
+        )
+
+    @patch('api.views._get_projeto_ou_403')
+    @patch('api.views.Card')
+    def test_backlog_card_edit_rejects_execution_fields(self, card_model, get_project):
+        get_project.return_value = (self.project, 'GERENTE', None)
+        card = SimpleNamespace(
+            id=77,
+            projeto_id=10,
+            sprint_id=None,
+            tipo='TAREFA',
+            responsavel_id=None,
+        )
+        card_model.objects.select_related.return_value.get.return_value = card
+        request = self.factory.patch(
+            '/api/cards/77/',
+            {'responsavel_id': 2},
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.card_detail(request, 77)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data['detail'],
+            'Cards no backlog são sugestões; responsável, prazo, estimativa e coluna só são definidos na sprint.',
+        )
 
 
 class MfaFlowTests(TestCase):

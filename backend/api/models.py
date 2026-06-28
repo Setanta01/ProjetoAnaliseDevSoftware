@@ -501,6 +501,43 @@ class Card(models.Model):
             return 'ABERTO'
 
 
+class SprintCardSnapshot(models.Model):
+    """Snapshot independente dos cards no momento de encerramento da sprint."""
+
+    id = models.AutoField(primary_key=True)
+    sprint = models.ForeignKey(
+        Sprint, on_delete=models.CASCADE,
+        db_column='sprint_id',
+        related_name='card_snapshots',
+    )
+    card_original_id = models.IntegerField()
+    codigo = models.CharField(max_length=20, blank=True, null=True)
+    titulo = models.CharField(max_length=200)
+    descricao = models.TextField(blank=True, null=True)
+    tipo = models.CharField(max_length=10)
+    prioridade = models.CharField(max_length=10)
+    status = models.CharField(max_length=20)
+    coluna_nome = models.CharField(max_length=100, blank=True, null=True)
+    responsavel_nome = models.CharField(max_length=150, blank=True, null=True)
+    due_date = models.DateField(null=True, blank=True)
+    estimativa_consolidada = models.IntegerField(null=True, blank=True)
+    criado_em = models.DateTimeField()
+    snapshot_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sprint_card_snapshots'
+        managed = False
+        constraints = [
+            models.UniqueConstraint(
+                fields=['sprint', 'card_original_id'],
+                name='uq_sprint_card_snapshot',
+            )
+        ]
+
+    def __str__(self):
+        return f'Snapshot sprint={self.sprint_id} card={self.card_original_id}'
+
+
 # =============================================================================
 # VÍNCULOS ENTRE CARDS
 # =============================================================================
