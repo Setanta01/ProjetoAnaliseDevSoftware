@@ -36,7 +36,12 @@ A **Autenticação** e a emissão de tokens JWT são gerenciadas nativamente pel
 
 #### Comunicação Bidirecional Assíncrona:
 
-Para atender aos requisitos de notificações e atualizações de interface (como comentários, ou modificações em um card no Kanban) sem a sobrecarga de manter conexões WebSockets abertas, a arquitetura definiu o uso de _Short Polling_. O frontend, gerenciado pelo React Query, realiza requisições HTTP de baixo custo e alta frequência para endpoints específicos no backend. Adicionalmente, interações com a tela usam _Optimistic Updates_ para atualizar a interface antes da confirmação do servidor, garantindo fluidez, e para implementar reversão no caso de erro da API.
+Para atender aos requisitos de notificações e atualizações de interface sem a
+sobrecarga de manter conexões WebSockets abertas, a arquitetura definiu o uso
+de _Short Polling_ combinado com *Optimistic Updates*. O frontend, gerenciado
+pelo React Query, realiza requisições HTTP leves para endpoints específicos no
+backend, enquanto mutações aplicam atualização imediata na interface antes da
+confirmação do servidor, com reversão automática em caso de erro.
 
 #### Serviços de Mensagem:
 

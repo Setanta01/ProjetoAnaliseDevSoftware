@@ -107,7 +107,7 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 2. O **Gerente** efetiva a conclusão (`POST /api/sprints/<id>/encerrar/`).
 3. Imediatamente a API sela de maneira estática a coluna de Data Hora de Fim (`data_fim`).
 4. Porém o Ágil é mutável e as sobras ocorrem. Como não convém abandonar Cards para o limbo, o payload escolhe `acao: "iniciar_planejada"` ou `acao: "pausar"`.
-   - Em `iniciar_planejada`, o sistema usa uma sprint já existente em `PLANEJADA`, inicia essa sprint e move os cards pendentes informados em `cards_para_sprint` para `To do`.
-   - Em `pausar`, a sprint atual é encerrada e nenhuma próxima sprint é iniciada imediatamente. Quando o projeto for retomado pelo início da sprint planejada, os cards pendentes da última sprint encerrada migram para `To do`.
+   - Em `iniciar_planejada`, o sistema usa uma sprint já existente em `PLANEJADA`, inicia essa sprint e move os cards pendentes informados em `cards_para_sprint`. Cards que estavam em `Review` permanecem em `Review`; os demais retornam para `To do`.
+   - Em `pausar`, a sprint atual é encerrada e nenhuma próxima sprint é iniciada imediatamente. Quando o projeto for retomado pelo início da sprint planejada, os cards pendentes da última sprint encerrada migram seguindo a mesma regra: `Review` permanece em `Review`, demais cards retornam para `To do`.
    - `cards_para_backlog` contém cards que devem voltar ao estado frio do `Backlog`.
 5. Não há digitação do nome da próxima sprint no encerramento. A próxima sprint deve ter sido criada antes como `PLANEJADA`, ou o gerente encerra e pausa o projeto.
