@@ -74,7 +74,7 @@ usuario.
       `GET /api/cards/<id>/historico/`.
 - [x] Incluir mudancas relevantes no historico visual: coluna, responsavel,
       validacao QA, impedimento e prazo enquanto `due_date` ainda existir.
-- [ ] Permitir editar/remover comentario pela UI se isso for exigido na
+- [x] Permitir editar/remover comentario pela UI se isso for exigido na
       apresentacao.
 - [x] Avaliar se checklists precisam de titulo editavel ou apenas itens simples
       sao suficientes para Sprint 3.
@@ -145,7 +145,7 @@ usuario.
 - [x] Criar testes leves para regras de backlog/sprint e badge de atraso sem
       exigir fixtures complexas.
 - [x] Rodar `python manage.py check`.
-- [ ] Rodar testes backend disponiveis.
+- [x] Rodar testes backend disponiveis.
 - [x] Rodar `npm run typecheck`, `npm run lint` e `npm run build`.
 - [x] Atualizar documentacao apos implementacao.
 
@@ -183,7 +183,7 @@ usuario.
 
 ## Pontos a Esclarecer
 
-1. A coluna de QA deve se chamar `Review`, `Validação` ou outro nome?
+1. A coluna de QA deve se chamar `Review` ou `Validação`?
 2. Quem pode mover card para QA: responsavel, gerente, qualquer DEV/QA ou regra
    por coluna?
 3. Depois de reprovar, o card original volta para `To do`/`In Progress` ou fica
@@ -200,6 +200,17 @@ usuario.
    desta entrega?
 10. Auto update deve ser polling em todas as telas ou apenas refetch ao focar
     janela/invalidate apos mutacao?
+
+## Estado Atual
+
+- A validacao QA ficou restrita na interface ao card em `Review`, com a area de
+  detalhe exibindo o rotulo `Validação`.
+- Comentarios agora podem ser removidos pela interface e suportam mencoes e
+  anexos.
+- Cards em backlog continuam como sugestoes e nao liberam dados de execucao,
+  comentarios, checklist, anexos ou validacao.
+- Sprints encerradas passam a ter snapshot proprio no historico, para que a
+  visualizacao de uma sprint antiga nao dependa do estado corrente dos cards.
 
 ## Riscos
 

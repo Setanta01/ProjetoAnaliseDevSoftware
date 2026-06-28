@@ -42,23 +42,22 @@ funcionando e introduz:
 ### Parcialmente implementado
 
 - **US29 - Transicao para validacao:** existe coluna `Review`, badge
-  `aguardando_qa` e alguma regra para sair da coluna de validacao, mas a
-  coluna real padrao ainda e `Review`, enquanto a regra do backend usa
-  `COLUNA_VALIDACAO_NOME`. A politica de entrada/saida de QA ainda precisa ser
-  revisada contra os nomes reais das colunas.
+  `aguardando_qa` e regra alinhada com a interface para liberar a acao de
+  validacao apenas nessa etapa.
 - **US30 - Registro de teste:** backend tem modelo e endpoint
   `GET|POST /cards/<id>/validacao/`, grava historico e notifica responsavel.
   O modal do card permite QA/admin aprovar ou reprovar, exige observacao para
   reprovacao e mostra a ultima validacao.
-- **US31/US32 - Bugs completos:** a estrutura existe, mas falta fluxo dedicado
-  de anexos/evidencias acessiveis na interface. O modal ja permite criar bug
-  vinculado ao card original a partir da area de QA.
+- **US31/US32 - Bugs completos:** a estrutura existe e a area de QA ja cria
+  bug vinculado ao card original. O fluxo de anexos e evidencias segue
+  parcial, mas comentarios agora aceitam anexos com preview de imagem.
 - **US10 - Permissoes de transicao:** backend tem `PermissaoColuna` no modelo
   e uma regra hardcoded parcial. O Board permite gerente/admin ou responsavel
   mover cards. Falta consolidar uma regra unica por cargo/coluna e refletir isso
   no frontend sem depender apenas de `canManage` ou responsavel.
-- **Anexos:** backend tem upload/remocao de anexos em card e comentario, mas o
-  frontend mostra icone de anexo sem fluxo real de upload/listagem.
+- **Anexos:** backend tem upload/remocao de anexos em card e comentario, e o
+  frontend ja lista anexos de comentario com abertura direta e preview de
+  imagem. O fluxo de anexos em nivel de card ainda nao aparece na interface.
 
 ### Nao implementado ou nao verificavel pela UI atual
 

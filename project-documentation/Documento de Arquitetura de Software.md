@@ -4,7 +4,7 @@
 
 O **Lazuli** é uma plataforma de gestão ágil voltada para equipes de desenvolvimento, desenhada para reduzir o atrito e simplificar fluxos de trabalho. O modelo de domínio central do sistema orbita em torno das seguintes entidades:
 - **Projetos:** Contêineres lógicos de alto nível. Um projeto abriga uma equipe específica e concentra todo o escopo de trabalho.
-- **Sprints:** Ciclos de tempo (timeboxes) associados a um projeto, divididos em *Sprints Ativas* (em execução) e *Sprints Planejadas* (backlog futuro).
+- **Sprints:** Ciclos de tempo (timeboxes) associados a um projeto, com foco na sprint ativa e no historico das sprints encerradas.
 - **Cards (Tarefas/Bugs):** A menor unidade de trabalho, contendo estimativas, prazos, responsáveis, status e checklists.
 - **Workflow (Kanban):** Representação visual das etapas de desenvolvimento (ex: *To Do*, *Doing*, *Validação*, *Done*).
 
@@ -34,14 +34,13 @@ A comunicação entre o cliente e o servidor ocorre exclusivamente através de u
 #### Gestão de Identidade e Acessos:
 A **Autenticação** e a emissão de tokens JWT são gerenciadas nativamente pelo backend utilizando o **Django REST Framework (DRF)** com a biblioteca *Simple JWT*. A aplicação possui implementação própria para autenticação de dois fatores (MFA - via e-mail e TOTP) e Single Sign-On (SSO) com o Google OAuth. O fluxo de segurança utiliza um *Token de Desafio (MFA Token)* de curta duração antes da emissão do JWT final de sessão. A **Autorização** contextual define as permissões específicas do usuário dependendo do projeto que ele acessa, sendo estruturada através do sistema de Grupos e Permissões do Django em conjunto com tabelas associativas (como de “membro de um projeto”).
 
-#### Comunicação Bidirecional Assíncrona:
+#### Sincronizacao de Interface:
 
-Para atender aos requisitos de notificações e atualizações de interface sem a
-sobrecarga de manter conexões WebSockets abertas, a arquitetura definiu o uso
-de _Short Polling_ combinado com *Optimistic Updates*. O frontend, gerenciado
-pelo React Query, realiza requisições HTTP leves para endpoints específicos no
-backend, enquanto mutações aplicam atualização imediata na interface antes da
-confirmação do servidor, com reversão automática em caso de erro.
+A interface do frontend usa cache local, invalidacao de consultas e mutacoes
+otimizadas para refletir mudancas de forma consistente sem depender de conexoes
+persistentes. Os detalhes operacionais dessa atualizacao ficam registrados no
+documento de implementacao, que pode ser ajustado sem alterar a base
+arquitetural.
 
 #### Serviços de Mensagem:
 

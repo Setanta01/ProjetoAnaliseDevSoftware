@@ -80,7 +80,7 @@
 | Método | Rota                      | Perm.      | Descrição e Payload                                                                                          |
 | ------ | ------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
 | `GET`  | `/projetos/<id>/backlog/` | `[MEMBRO]` | Lista cards sem sprint, ordenados por prioridade.                                                            |
-| `GET`  | `/projetos/<id>/sprints/` | `[MEMBRO]` | Lista histórico, ativa e planeada do projeto.                                                                |
+| `GET`  | `/projetos/<id>/sprints/` | `[MEMBRO]` | Lista o historico e a sprint ativa do projeto.                                                               |
 | `POST` | `/projetos/<id>/sprints/` | `[GER]`    | **Payload opcional:** `nome`. Mantido por compatibilidade; a UI não cria mais sprint planejada manualmente. |
 | `POST` | `/sprints/<id>/iniciar/`  | `[GER]`    | Inicia sprint (status → ATIVA). Se houver cards pendentes na última sprint encerrada do projeto, eles migram para `To do`. |
 | `GET`  | `/sprints/<id>/`          | `[MEMBRO]` | Retorna árvore completa da sprint ativa. Para sprint encerrada com snapshot, retorna a lista histórica de cards capturada no encerramento. |
@@ -92,10 +92,10 @@
 
 | Método   | Rota                        | Perm.      | Descrição e Payload                                                                                                                                                               |
 | -------- | --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST`   | `/projetos/<id>/cards/`     | `[GER/QA]` | **Payload:** `titulo`, `tipo` (TAREFA/BUG), `sprint_id`, `prioridade`, `responsavel_id`, `due_date`, `criterios_aceitacao`, `estimativa_consolidada`, `pronto_para_estimativa`. QA pode criar apenas `BUG`. Sem `sprint_id`, o card fica no backlog como sugestão e não aceita responsável, prazo ou estimativa. Para entrega na sprint atual, enviar `due_date="SPRINT_ATUAL"` ou `entrega_na_sprint=true`. Se BUG, aceita `passos_reproducao`, `resultado_esperado` e `card_origem_id`. |
+| `POST`   | `/projetos/<id>/cards/`     | `[GER/QA]` | **Payload:** `titulo`, `tipo` (TAREFA/BUG), `sprint_id`, `prioridade`, `responsavel_id`, `due_date`, `criterios_aceitacao`, `estimativa_consolidada`, `pronto_para_estimativa`. QA pode criar apenas `BUG`. Sem `sprint_id`, o card fica no backlog como sugestao e nao aceita responsavel, prazo, estimativa, comentarios, checklists, anexos ou validacao. Para entrega na sprint atual, enviar `due_date="SPRINT_ATUAL"` ou `entrega_na_sprint=true`. Se BUG, aceita `passos_reproducao`, `resultado_esperado` e `card_origem_id`. |
 | `GET`    | `/cards/`                   | `[MEMBRO]` | Lista geral de cards. Aceita query param `?responsavel=me` para filtrar próprias tarefas.                                                                                         |
 | `GET`    | `/cards/<id>/`              | `[MEMBRO]` | Detalhes completos do card.                                                                                                                                                       |
-| `PATCH`  | `/cards/<id>/`              | `[MEMBRO]` | Atualiza campos, move `coluna_id` ou altera responsável. Gerente edita cards gerais; QA pode editar BUG. `sprint_id=null` move para backlog e limpa dados específicos da sprint. Cards no backlog só aceitam dados de sugestão; responsável, prazo, estimativa e coluna são bloqueados até entrar em sprint. `due_date="SPRINT_ATUAL"` atrela entrega à sprint atual; `due_date=null` remove esse vínculo. |
+| `PATCH`  | `/cards/<id>/`              | `[MEMBRO]` | Atualiza campos, move `coluna_id` ou altera responsavel. Gerente edita cards gerais; QA pode editar BUG. `sprint_id=null` move para backlog e limpa dados especificos da sprint. Cards no backlog só aceitam dados de sugestao; responsavel, prazo, estimativa, coluna, comentarios, checklist, anexos e validacao ficam bloqueados ate entrar em sprint. `due_date="SPRINT_ATUAL"` atrela entrega à sprint atual; `due_date=null` remove esse vínculo. |
 | `DELETE` | `/cards/<id>/`              | `[GER]`    | Remove o card.                                                                                                                                                                    |
 | `GET`    | `/cards/<id>/historico/`    | `[MEMBRO]` | Lista registos de auditoria (mudança de coluna, responsável, etc).                                                                                                                |
 | `POST`   | `/cards/<id>/marcar-visto/` | `[MEMBRO]` | Regista leitura e limpa flags visuais de novidade para o utilizador.                                                                                                              |
@@ -120,17 +120,17 @@
 | `GET`       | `/cards/<id>/vinculos/`           | `[MEMBRO]`   | Lista vínculos do card.                                            |
 | `POST`      | `/cards/<id>/vinculos/`           | `[GER]`      | **Payload:** `card_destino_id`, `tipo_vinculo`.                    |
 | `DELETE`    | `/cards/vinculos/<id>/`           | `[GER]`      | Remove o vínculo.                                                  |
-| `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentário. **POST:** `texto`, `mencionados_ids`. Notifica participantes e usuários mencionados. |
-| `PATCH/DEL` | `/cards/comentarios/<id>/`        | `[USER/GER]` | Edita ou remove o próprio comentário (Gerente remove qualquer um). |
-| `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card. Aceita imagem, vídeo, PDF e documento de texto, até 65 MB. |
-| `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa imagem, vídeo, PDF ou documento de texto num comentário específico, até 65 MB. |
+| `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentario. **POST:** `texto`, `mencionados_ids`. Notifica participantes e usuarios mencionados do projeto. Em backlog, o POST e bloqueado. |
+| `PATCH/DEL` | `/cards/comentarios/<id>/`        | `[USER/GER]` | Edita ou remove o proprio comentario (Gerente remove qualquer um). |
+| `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card. Aceita imagem, video, PDF e documento de texto, ate 65 MB. Em backlog o POST e bloqueado. |
+| `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa imagem, video, PDF ou documento de texto num comentario especifico, ate 65 MB. |
 | `DELETE`    | `/cards/anexos/<id>/`             | `[USER/GER]` | Remove anexo.                                                      |
 
 ### Validação QA e Impedimentos
 
 | Método   | Rota                       | Perm.      | Descrição e Payload                                                            |
 | -------- | -------------------------- | ---------- | ------------------------------------------------------------------------------ |
-| `POST`   | `/cards/<id>/validacao/`   | `[QA]`     | **Payload:** `resultado` (APROVADO/REPROVADO), `observacao`. QA regista teste; `observacao` é obrigatória para `REPROVADO`. |
+| `POST`   | `/cards/<id>/validacao/`   | `[QA/ADMIN]` | **Payload:** `resultado` (APROVADO/REPROVADO), `observacao`. A UI libera a acao apenas quando o card esta em Review. `observacao` e obrigatoria para `REPROVADO`. |
 | `GET`    | `/cards/<id>/validacao/`   | `[MEMBRO]` | Lista histórico de validações.                                                 |
 | `POST`   | `/cards/<id>/impedimento/` | `[MEMBRO]` | **Payload:** `comentario`. Marca card como impedido.                           |
 | `DELETE` | `/cards/<id>/impedimento/` | `[MEMBRO]` | Remove o impedimento do card.                                                  |

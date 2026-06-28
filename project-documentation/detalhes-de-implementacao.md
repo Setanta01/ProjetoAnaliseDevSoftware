@@ -17,6 +17,7 @@ O backend atualmente agenda e-mails para estes eventos:
 - Reenvio de codigo MFA por e-mail.
 - Novo comentario em um card, notificando responsavel e participantes previos.
 - Mencao explicita de usuario em comentario, notificando o usuario mencionado.
+- Comentario com mencao usa os membros do proprio projeto como universo de busca.
 - Card liberado para Planning Poker.
 - Validacao QA.
 - Registro de impedimento.
@@ -46,6 +47,9 @@ evitar desatualizacao visual entre mutacoes e troca de abas.
   notificacoes por e-mail.
 - O documento de arquitetura deve permanecer em nivel mais estavel, sem listar
   frequencias exatas ou gatilhos operacionais.
+- Comentarios, validacao QA, anexos e checklist nao ficam disponiveis para
+  edicao em cards no backlog; eles passam a valer apenas quando o card entra em
+  uma sprint.
 
 ## Anexos em Cards e Comentarios
 
@@ -69,3 +73,8 @@ servidos em `MEDIA_URL` (`/media/`) enquanto `DEBUG=True`.
 Ao remover um anexo cuja URL aponta para `MEDIA_URL`, a view remove tambem o
 arquivo fisico do storage local. URLs externas continuam sendo tratadas apenas
 como metadado e a remocao exclui somente o registro do banco.
+
+Na interface atual, anexos de comentario podem ser abertos diretamente e
+imagens exibem uma miniatura inline. O card usa `projeto_id` no payload para
+carregar apenas os membros do projeto no seletor de mencoes, evitando depender
+de listagem global de usuarios.

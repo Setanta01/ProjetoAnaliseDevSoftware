@@ -2,7 +2,8 @@
 
 Esta pasta concentra o planejamento da Sprint 3 do
 `Documento de Priorização.pdf`: controle de qualidade, bugs, permissao de
-transicoes, remocao de membros, historico, prioridade, checklists e comentarios.
+transicoes, remocao de membros, historico, prioridade, checklists, comentarios
+e anexos em comentarios.
 
 ## Documentos
 

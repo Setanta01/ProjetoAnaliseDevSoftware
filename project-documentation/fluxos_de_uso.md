@@ -1,10 +1,10 @@
 # Fluxos de Uso — Lazuli
 
-Este documento detalha as principais jornadas de uso e os fluxos sistêmicos planejados para a aplicação, servindo como guia prático de como as Histórias de Usuário, os Endpoints e o Banco de Dados se interconectam. Além disso, descreve intenções técnicas para o Frontend e Backend (ex: estratégia de _fetching_, gerenciamento de estado) como referência para a equipe técnica.
+Este documento detalha as principais jornadas de uso e os fluxos sistêmicos da aplicação, servindo como guia prático de como as Histórias de Usuário, os Endpoints e o Banco de Dados se interconectam. Detalhes operacionais mais mutáveis, como intervalos de refresh, ficam concentrados em `detalhes-de-implementacao.md`.
 
 ---
 
-> **Notificações e E-mails (Intenção Técnica):** O sistema não possui um "sininho" global na interface de usuário (UI). Alertas críticos (atribuições diretas, falhas de validação de QA, convites e recuperação) são persistidos em uma fila PostgreSQL e entregues por um worker SMTP, sem bloquear requests da API. Para manter a comunicação fluida no board e de forma contextualizada, o payload principal da Sprint injetará flags dinâmicas (`tem_novidade`, `novos_comentarios`) indicando atualizações não lidas no escopo daquele Card desde a última vez que o usuário visualizou.
+> **Notificacoes e E-mails:** O sistema não possui um "sininho" global na interface de usuário (UI). Alertas críticos, como atribuições diretas, falhas de validação de QA, convites, recuperação e menções em comentários, sao persistidos em fila e entregues por worker SMTP, sem bloquear requests da API.
 
 ## 1. Fluxo de Convite, Autenticação e Segurança
 
@@ -46,11 +46,11 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 ## 3. Fluxo de Planejamento (Sprints e Poker)
 
 ### Construção do Backlog
-1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`). Nesta etapa entram apenas dados ainda independentes da sprint, como título, descrição, tipo e critérios de aceitação. Campos de execução como prioridade, responsável, deadline e dificuldade/Planning Poker ficam para quando o card entrar em uma sprint.
+1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`). Nesta etapa entram apenas dados ainda independentes da sprint, como título, descrição, tipo e critérios de aceitação. Campos de execução como prioridade, responsável, deadline, checklists, comentarios, anexos e validação ficam para quando o card entrar em uma sprint.
 
 ### Preparação da Sprint
-1. O **Gerente** cria uma sprint (`POST /api/projetos/<id>/sprints/`). Uma regra crucial de negócio: Sprints nascem como `PLANEJADA` e **não definem data de início ou de fim** durante o planejamento. O sistema não engessa datas futuras, respeitando Sprints que sofrem readequação de tamanho antes de entrarem em vigência.
-2. O Gerente move cards do Backlog para dentro da Sprint. Ao fazer isso, o sistema abre o formulário do card com os dados já preenchidos e permite revisar informações específicas da sprint, como prioridade, título, descrição, critérios de aceitação, responsável, deadline e dificuldade/Planning Poker. O card entra sempre na coluna `To do`.
+1. O **Gerente** abre uma sprint para o projeto (`POST /api/projetos/<id>/sprints/`). A interface não expõe mais uma tela separada de sprint planejada; o foco operacional fica na sprint ativa e no historico das encerradas.
+2. O Gerente move cards do Backlog para dentro da Sprint. Ao fazer isso, o sistema abre o formulário do card com os dados já preenchidos e permite revisar informações específicas da sprint, como prioridade, titulo, descricao, criterios de aceitacao, responsavel, deadline e dificuldade/Planning Poker. O card entra sempre na coluna `To do`.
 
 ### Estimativa com Planning Poker
 1. O time precisa estimar os pontos de esforço para uma tarefa. O Gerente aciona no card a opção `pronto_para_estimativa = true`.
@@ -65,12 +65,12 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos pla
 
 ## 4. Fluxo de Execução (O Board Dinâmico)
 
-> **Intenção Técnica de Fetch (React Query):** Para fornecer uma visão ágil de Kanban com baixo overhead sem recair em WebSockets complexos, a estratégia será de *Short Polling*. O endpoint de Board da Sprint (`GET /api/sprints/<id>/`) retorna uma resposta *agregada*. Em uma única requisição a API deve fornecer os arrays de Colunas e todos os Cards (contendo junto checklists, votos de poker ativos, histórico rápido, tags). As Mutações (mover, editar, checklist) disparam pequenos POSTs granulares seguidos de invalidação do cache do React Query (`invalidateQueries`), atualizando o layout imediatamente. Devido ao tamanho das equipes (até 10 pessoas), essa operação otimizada supre amplamente a necessidade de desempenho.
+> **Atualização de Interface:** O frontend usa invalidacao de cache e refetch seletivo para manter o board e as telas compartilhadas consistentes. Os detalhes de intervalo e politica de refresh ficam documentados em `detalhes-de-implementacao.md`.
 
 ### Executando Tarefas e Mutabilidade
-1. O **Dev** arrasta o card para a coluna de andamento e a interface dispara em backgroud a alteração de status/coluna (`PATCH /api/cards/<id>/`). A alteração do responsável pelo Card insere um log na timeline natural (`card_historico`).
+1. O **Dev** arrasta o card para a coluna de andamento e a interface dispara em backgroud a alteração de status/coluna (`PATCH /api/cards/<id>/`). A alteração do responsavel pelo Card insere um log na timeline natural (`card_historico`).
 2. O Dev preenche ou dá "check" em itens da sua lista de `checklists` dentro do card. Cada alteração dispara uma atualização isolada (`PATCH` em `/itens/<id>/`), permitindo acompanhamento simultâneo do time.
-3. Para comunicação focada na tarefa, o Dev cria um novo comentário no card. Esta ação atualiza a data de última modificação do card, dispara notificações por e-mail aos envolvidos (como os marcados ou o responsável pela tarefa), e sinaliza aos outros membros uma novidade a ser lida.
+3. Para comunicação focada na tarefa, o Dev cria um novo comentário no card. Esta ação atualiza a data de ultima modificacao do card, dispara notificacoes por e-mail aos envolvidos (como os marcados ou o responsavel pela tarefa), e sinaliza aos outros membros uma novidade a ser lida.
 
 ### Gestão de Exceções de Prazo e Impedimentos
 1. Quando uma entrega exige renegociação e uma nova data de vencimento (`due_date`) é proposta, a API intercepta a request e exige que no Payload haja obrigatoriamente a explicação `justificativa_prazo`. Sem o comentário, a modificação falha. O relato será gravado e anexado ao log da alteração.
@@ -93,8 +93,8 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 
 ## 5. Fluxo de Qualidade (QA e Validação)
 
-1. A tarefa evolui, e o responsável empurra para a coluna sistêmica fixa de **Validação / Revisão QA**.
-2. **A Trava Sistêmica do Processo:** O Frontend deve barrar e o Backend validar rigidamente. Uma vez lá dentro, somente usuários atrelados sob o papel de `QA` (ou o próprio dono geral do projeto `GERENTE`) dispõem da credencial de autorização para executar comandos de mudança que arrastem esse `card_id` para Fora desta Coluna de Estado.
+1. A tarefa evolui, e o responsável empurra para a coluna sistêmica fixa de **Review**, exibida na interface como a area de **Validação** do card.
+2. **A Trava Sistêmica do Processo:** O Frontend deve barrar e o Backend validar rigidamente. Uma vez na coluna de validacao, somente usuarios atrelados sob o papel de `QA` (ou o proprio dono geral do projeto `GERENTE`) dispõem da credencial de autorizacao para executar comandos de mudança que arrastem esse `card_id` para fora dessa coluna.
 3. O QA toma o card, afere seu comportamento nas suas test suites e aciona (`POST /api/cards/<id>/validacao/`), chancelando o trabalho com um status estrito ENUM de `APROVADO` ou `REPROVADO`.
 4. Caso validado como Negado (`REPROVADO`), ele recebe o sinal verde para arrastar fisicamente o Card de volta para as Colunas de andamento ou devidas correções ao Dev.
 5. Em eventos catastróficos onde a "Tarefa" gerou uma pane isolada (Bug formal), o QA poderá criar um Card novo do tipo `tipo: BUG` (onde os payloads aceitam informações aprofundadas como Passos de Reprodução e Resultado Esperado), e no mesmo instante submetem à interface um Vínculo apontando para a "Tarefa X" (`POST /api/cards/<id>/vinculos/` com Tipo Vinculo de Natureza `BLOQUEIA`).
@@ -103,11 +103,11 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 
 ## 6. Fluxo de Encerramento e Limpeza
 
-1. A Sprint alcança o seu horizonte natural de encerramento prático.
-2. O **Gerente** efetiva a conclusão (`POST /api/sprints/<id>/encerrar/`).
-3. Imediatamente a API sela de maneira estática a coluna de Data Hora de Fim (`data_fim`).
-4. Porém o Ágil é mutável e as sobras ocorrem. Como não convém abandonar Cards para o limbo, o payload escolhe `acao: "iniciar_planejada"` ou `acao: "pausar"`.
-   - Em `iniciar_planejada`, o sistema usa uma sprint já existente em `PLANEJADA`, inicia essa sprint e move os cards pendentes informados em `cards_para_sprint`. Cards que estavam em `Review` permanecem em `Review`; os demais retornam para `To do`.
-   - Em `pausar`, a sprint atual é encerrada e nenhuma próxima sprint é iniciada imediatamente. Quando o projeto for retomado pelo início da sprint planejada, os cards pendentes da última sprint encerrada migram seguindo a mesma regra: `Review` permanece em `Review`, demais cards retornam para `To do`.
-   - `cards_para_backlog` contém cards que devem voltar ao estado frio do `Backlog`.
-5. Não há digitação do nome da próxima sprint no encerramento. A próxima sprint deve ter sido criada antes como `PLANEJADA`, ou o gerente encerra e pausa o projeto.
+1. A Sprint alcança o seu horizonte natural de encerramento pratico.
+2. O **Gerente** efetiva a conclusao (`POST /api/sprints/<id>/encerrar/`).
+3. Imediatamente a API sela de maneira estatica a coluna de data e hora de fim (`data_fim`) e grava snapshot dos cards da sprint encerrada.
+4. O payload escolhe `acao: "iniciar_planejada"` ou `acao: "pausar"`.
+   - Em `iniciar_planejada`, o sistema inicia a proxima sprint cadastrada e move os cards pendentes informados em `cards_para_sprint`. Cards que estavam em `Review` permanecem em `Review`; os demais retornam para `To do`.
+   - Em `pausar`, a sprint atual e encerrada sem iniciar uma nova imediatamente. Quando o projeto for retomado, uma nova sprint pode ser criada e iniciada sem perder o snapshot da sprint anterior.
+   - `cards_para_backlog` contem cards que devem voltar ao estado frio do `Backlog`.
+5. O historico de sprints deve permitir abrir sprints antigas e ver o estado congelado no encerramento, sem depender dos cards atuais do projeto.
