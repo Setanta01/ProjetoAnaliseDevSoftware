@@ -66,6 +66,7 @@ COLUNAS_PADRAO = [
 COLUNA_VALIDACAO_NOME = 'Review'
 BOOTSTRAP_ADMIN_LOCK_ID = 12648430
 PLANNING_POKER_VALORES = {1, 2, 3, 5, 8, 13, 21}
+ANEXO_MAX_UPLOAD_BYTES = getattr(settings, 'ANEXO_MAX_UPLOAD_BYTES', 65 * 1024 * 1024)
 
 
 def _status_projeto(projeto):
@@ -247,7 +248,7 @@ def _serializar_comentario(c):
         'criado_em': c.criado_em,
         'editado_em': c.editado_em,
         'anexos': [
-            {'id': a.id, 'nome': a.nome_arquivo, 'url': a.url, 'mime_type': a.mime_type}
+            _serializar_anexo(a)
             for a in c.anexos.all()
         ],
     }
@@ -267,6 +268,11 @@ ANEXO_MIME_TYPES_PERMITIDOS = {
 
 
 def _validar_anexo_permitido(arquivo):
+    if arquivo.size > ANEXO_MAX_UPLOAD_BYTES:
+        return Response(
+            {'detail': 'Anexo deve ter no máximo 65 MB.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
     if arquivo.content_type in ANEXO_MIME_TYPES_PERMITIDOS or arquivo.content_type.startswith('video/'):
         return None
     return Response(
@@ -280,6 +286,22 @@ def _salvar_arquivo_anexo(arquivo):
     caminho = f'anexos/{secrets.token_urlsafe(8)}_{nome_seguro}'
     caminho_salvo = default_storage.save(caminho, arquivo)
     return default_storage.url(caminho_salvo)
+
+
+def _caminho_storage_anexo(url):
+    media_url = settings.MEDIA_URL
+    if url.startswith(media_url):
+        return url.removeprefix(media_url).lstrip('/')
+    return None
+
+
+def _serializar_anexo(anexo):
+    return {
+        'id': anexo.id,
+        'nome': anexo.nome_arquivo,
+        'url': anexo.url,
+        'mime_type': anexo.mime_type,
+    }
 
 
 def _ids_mencionados(request):
@@ -1139,6 +1161,8 @@ def projeto_sprints(request, projeto_id):
             Sprint.objects.filter(projeto=projeto)
             .annotate(
                 total_cards=Count('cards'),
+                total_tasks=Count('cards', filter=Q(cards__tipo='TAREFA')),
+                total_bugs=Count('cards', filter=Q(cards__tipo='BUG')),
                 concluidos=Count('cards', filter=Q(cards__coluna__e_final=True)),
             )
             .order_by('criado_em')
@@ -1154,6 +1178,8 @@ def projeto_sprints(request, projeto_id):
                 'data_inicio':  s.data_inicio,
                 'data_fim':     s.data_fim,
                 'total_cards':  total,
+                'total_tasks':  s.total_tasks,
+                'total_bugs':   s.total_bugs,
                 'concluidos':   concl,
                 'progresso':    round(concl / total * 100, 1) if total else 0,
             })
@@ -2270,10 +2296,7 @@ def card_anexos(request, card_id):
         nome_arquivo=arquivo.name,
         mime_type=arquivo.content_type,
     )
-    return Response(
-        {'id': anexo.id, 'nome': anexo.nome_arquivo, 'url': anexo.url},
-        status=status.HTTP_201_CREATED,
-    )
+    return Response(_serializar_anexo(anexo), status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])
@@ -2309,10 +2332,7 @@ def comentario_anexos(request, comentario_id):
         nome_arquivo=arquivo.name,
         mime_type=arquivo.content_type,
     )
-    return Response(
-        {'id': anexo.id, 'nome': anexo.nome_arquivo, 'url': anexo.url},
-        status=status.HTTP_201_CREATED,
-    )
+    return Response(_serializar_anexo(anexo), status=status.HTTP_201_CREATED)
 
 
 @api_view(['DELETE'])
@@ -2340,8 +2360,10 @@ def anexo_detail(request, anexo_id):
     if not eh_dono and not eh_gerente:
         return Response({'detail': 'Sem permissão para remover este anexo.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Anexo.url é TextField — NÃO chamar arquivo.delete().
+    caminho_storage = _caminho_storage_anexo(anexo.url)
     anexo.delete()
+    if caminho_storage:
+        default_storage.delete(caminho_storage)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 

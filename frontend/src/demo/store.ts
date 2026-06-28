@@ -57,6 +57,22 @@ function projectWithState(project: Projeto): Projeto {
   return { ...project, member_count: memberCount, status: project.arquivado ? 'INATIVO' : hasActiveSprint ? 'ATIVO' : 'PAUSADO' }
 }
 
+function sprintWithCounts(sprint: Sprint): Sprint {
+  const cards = sprint.status === 'ENCERRADA' && database.sprintSnapshots[sprint.id]?.length
+    ? database.sprintSnapshots[sprint.id]
+    : database.tasks.filter((task) => task.sprint_id === sprint.id)
+  const totalCards = cards.length
+  const concluidas = cards.filter((task) => task.status === 'CONCLUIDO').length
+  return {
+    ...sprint,
+    total_cards: totalCards,
+    total_tasks: cards.filter((task) => task.tipo !== 'BUG').length,
+    total_bugs: cards.filter((task) => task.tipo === 'BUG').length,
+    concluidas,
+    progresso: totalCards ? Math.round((concluidas / totalCards) * 100) : 0,
+  }
+}
+
 const demoColumns: BoardColumn[] = [
   { id: 1, nome: 'To do', posicao: 1, e_inicial: true },
   { id: 2, nome: 'In Progress', posicao: 2 },
@@ -100,7 +116,7 @@ async function handleRequest(config: InternalAxiosRequestConfig): Promise<AxiosR
   }
 
   const projectSprintsMatch = path.match(/^\/projetos\/(\d+)\/sprints$/)
-  if (method === 'GET' && projectSprintsMatch) return response(config, structuredClone(database.sprints.filter((sprint) => sprint.projeto_id === Number(projectSprintsMatch[1]))))
+  if (method === 'GET' && projectSprintsMatch) return response(config, structuredClone(database.sprints.filter((sprint) => sprint.projeto_id === Number(projectSprintsMatch[1])).map(sprintWithCounts)))
   if (method === 'POST' && projectSprintsMatch) {
     const payload = parsePayload<{ nome?: string }>(config.data || {})
     const projectId = Number(projectSprintsMatch[1])

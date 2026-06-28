@@ -59,7 +59,13 @@ Os tipos aceitos atualmente sao:
 - texto simples ou Markdown (`text/plain`, `text/markdown`)
 - documentos Word (`.doc`, `.docx`)
 
+O tamanho maximo aceito por anexo e de `65 MB`.
+
 Quando o payload nao informa uma `url`, o backend salva o arquivo recebido em
 `MEDIA_ROOT/anexos` e retorna a URL publica gerada pelo storage configurado. No
 ambiente local, `MEDIA_ROOT` aponta para `backend/media` e os arquivos sao
 servidos em `MEDIA_URL` (`/media/`) enquanto `DEBUG=True`.
+
+Ao remover um anexo cuja URL aponta para `MEDIA_URL`, a view remove tambem o
+arquivo fisico do storage local. URLs externas continuam sendo tratadas apenas
+como metadado e a remocao exclui somente o registro do banco.

@@ -30,6 +30,7 @@ export interface Sprint {
   projeto_id: number;
   total_cards?: number;
   total_tasks?: number;
+  total_bugs?: number;
   concluidas?: number;
   progresso?: number;
   data_inicio?: string;

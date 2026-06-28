@@ -470,6 +470,22 @@ class Sprint3BacklogRuleTests(TestCase):
             'Cards no backlog são sugestões; responsável, prazo, estimativa e coluna só são definidos na sprint.',
         )
 
+    def test_attachment_rejects_files_over_65mb(self):
+        arquivo = SimpleNamespace(size=(65 * 1024 * 1024) + 1, content_type='video/mp4')
+
+        response = views._validar_anexo_permitido(arquivo)
+
+        self.assertIsInstance(response, Response)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'Anexo deve ter no máximo 65 MB.')
+
+    def test_attachment_accepts_video_within_65mb(self):
+        arquivo = SimpleNamespace(size=65 * 1024 * 1024, content_type='video/mp4')
+
+        response = views._validar_anexo_permitido(arquivo)
+
+        self.assertIsNone(response)
+
 
 class MfaFlowTests(TestCase):
     def setUp(self):

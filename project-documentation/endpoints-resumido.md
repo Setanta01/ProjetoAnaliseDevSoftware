@@ -122,8 +122,8 @@
 | `DELETE`    | `/cards/vinculos/<id>/`           | `[GER]`      | Remove o vínculo.                                                  |
 | `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentário. **POST:** `texto`, `mencionados_ids`. Notifica participantes e usuários mencionados. |
 | `PATCH/DEL` | `/cards/comentarios/<id>/`        | `[USER/GER]` | Edita ou remove o próprio comentário (Gerente remove qualquer um). |
-| `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card. Aceita imagem, vídeo, PDF e documento de texto. |
-| `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa imagem, vídeo, PDF ou documento de texto num comentário específico. |
+| `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card. Aceita imagem, vídeo, PDF e documento de texto, até 65 MB. |
+| `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa imagem, vídeo, PDF ou documento de texto num comentário específico, até 65 MB. |
 | `DELETE`    | `/cards/anexos/<id>/`             | `[USER/GER]` | Remove anexo.                                                      |
 
 ### Validação QA e Impedimentos

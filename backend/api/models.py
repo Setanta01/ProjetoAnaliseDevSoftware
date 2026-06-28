@@ -849,7 +849,7 @@ class Comentario(models.Model):
 class Anexo(models.Model):
     """
     Tabela: anexos — 'url' é TextField (não FileField).
-    NÃO chamar arquivo.delete(); deleção física via SDK do storage externo.
+    A deleção física é feita pela view quando a URL aponta para MEDIA_URL local.
     """
 
     id           = models.AutoField(primary_key=True)

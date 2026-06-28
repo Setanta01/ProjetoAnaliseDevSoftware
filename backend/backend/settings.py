@@ -125,4 +125,5 @@ USE_TZ        = True
 STATIC_URL = 'static/'
 MEDIA_URL = '/media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+ANEXO_MAX_UPLOAD_BYTES = 65 * 1024 * 1024
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
