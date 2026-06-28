@@ -50,7 +50,8 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
   const editing = Boolean(cardId && editingCardId === cardId)
   const isBacklog = task ? isBacklogCard(task) : false
   const canEditCard = canManage || (currentRole === 'QA' && task?.tipo === 'BUG') || currentRole === 'ADMIN'
-  const canValidateQA = currentRole === 'QA' || currentRole === 'ADMIN'
+  const isReviewCard = task?.status === 'REVISAO'
+  const canValidateQA = isReviewCard && (currentRole === 'QA' || currentRole === 'ADMIN')
   const currentUserName = members.find((member) => member.id === currentUserId)?.nome ?? 'Usuário'
   const latestValidation = validations.at(-1)
   const saveCardMutation = useMutation({
@@ -249,7 +250,6 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
               <section className="overflow-y-auto bg-card p-8">
                 <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canEditCard && <Button size="sm" variant="outline" onClick={() => { setSaveError(''); if (editing) { setEditingCardId(null); return } setEditForm(formFromTask(task)); setEditingCardId(task.id) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}{canManage && task.sprint_id && <Button size="sm" variant="secondary" disabled={moveToBacklogMutation.isPending} onClick={() => moveToBacklogMutation.mutate()}>{moveToBacklogMutation.isPending ? 'Movendo...' : 'Mover para backlog'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
                 <h2 className="mb-8 text-2xl font-bold leading-tight text-card-foreground">{task.titulo}</h2>
-                {isBacklog && <Alert className="mb-6">Card em backlog é uma sugestão. Responsável, validação, checklist, comentários, estimativa e prazo são definidos apenas quando ele entrar em uma sprint.</Alert>}
                 {editing && <EditCardForm form={editForm} members={members} isBacklog={isBacklog} isSaving={saveCardMutation.isPending} error={saveError} onChange={setEditForm} onSave={saveCard} />}
                 <div className="mb-8 grid grid-cols-2 gap-x-8 gap-y-7">
                   <Meta label="Status"><Badge variant="info">• {statusLabel(task.status)}</Badge></Meta>
@@ -263,7 +263,7 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
                 {task.tipo === 'BUG' && task.resultado_esperado && <DetailSection title="Resultado esperado"><p>{task.resultado_esperado}</p></DetailSection>}
                 {task.tipo === 'BUG' && task.card_origem_id && <DetailSection title="Origem"><p>Bug criado a partir do card #{task.card_origem_id}.</p></DetailSection>}
                 {Boolean(task.bugs_gerados?.length) && <DetailSection title="Bugs gerados"><div className="space-y-2">{task.bugs_gerados?.map((bug) => <div key={bug.id} className="rounded-md border border-border bg-muted p-3 text-sm"><span className="font-semibold text-card-foreground">{bug.codigo ?? `#${bug.id}`}</span> <span>{bug.titulo}</span>{bug.status && <Badge variant="neutral" className="ml-2">{statusLabel(bug.status)}</Badge>}</div>)}</div></DetailSection>}
-                {!isBacklog && (latestValidation || canValidateQA) && <QaPanel canValidate={canValidateQA} latestValidation={latestValidation} observation={qaObservation} bugForm={bugForm} isSaving={validateQaMutation.isPending || createBugMutation.isPending} error={qaError} onObservationChange={setQaObservation} onBugFormChange={setBugForm} onValidate={validateQa} onCreateBug={createBugFromQa} />}
+                {!isBacklog && (latestValidation || isReviewCard) && <QaPanel canValidate={canValidateQA} latestValidation={latestValidation} observation={qaObservation} bugForm={bugForm} isSaving={validateQaMutation.isPending || createBugMutation.isPending} error={qaError} onObservationChange={setQaObservation} onBugFormChange={setBugForm} onValidate={validateQa} onCreateBug={createBugFromQa} />}
               </section>
 
               <section className="flex min-h-0 flex-col border-l border-border bg-muted">
