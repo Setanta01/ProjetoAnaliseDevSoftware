@@ -15,6 +15,7 @@ O backend atualmente agenda e-mails para estes eventos:
 - Reenvio de convite valido.
 - Configuracao de MFA por e-mail.
 - Reenvio de codigo MFA por e-mail.
+- Atribuicao de responsavel a um card.
 - Novo comentario em um card, notificando responsavel e participantes previos.
 - Mencao explicita de usuario em comentario, notificando o usuario mencionado.
 - Comentario com mencao usa os membros do proprio projeto como universo de busca.
@@ -50,6 +51,10 @@ evitar desatualizacao visual entre mutacoes e troca de abas.
 - Comentarios, validacao QA, anexos e checklist nao ficam disponiveis para
   edicao em cards no backlog; eles passam a valer apenas quando o card entra em
   uma sprint.
+- Mencoes em comentarios sao persistidas em `comentarios_mencoes` para que a
+  indicacao visual continue aparecendo apos reload/polling.
+- Impedimento de card pode ser marcado ou removido apenas por gerente/admin ou
+  pelo responsavel atual do card.
 
 ## Anexos em Cards e Comentarios
 

@@ -2791,7 +2791,7 @@ export default function BoardView({ sprintId, projetoId, onOpenCard, onNewCard, 
         <div className="flex-1 overflow-y-auto bg-white rounded-lg border border-gray-200 mb-6">
            {/* Implementação simplificada da lista para não extender demais o código, 
                segue a mesma lógica de filtro do Kanban acima */}
-           <div className="p-4 text-center text-gray-500">Modo lista não implementado nesta demo.</div>
+           <div className="p-4 text-center text-gray-500">Modo lista não implementado.</div>
         </div>
       )}
     </div>
@@ -4395,7 +4395,6 @@ typing_extensions==4.15.0
 pyotp==2.9.0          # TOTP / HOTP (Google Authenticator)
 qrcode[pil]==8.0      # Geração de QR code PNG
 Pillow==11.2.1        # Dependência do qrcode[pil]
- 
+
 # ── Google OAuth ──────────────────────────
 requests==2.32.3      # Chamada HTTP para tokeninfo do Google
- 

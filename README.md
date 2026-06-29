@@ -70,10 +70,9 @@ npm install
 cp .env.example .env.local
 ```
 
-Para usar o backend real, mantenha:
+Configure a URL do backend:
 
 ```env
-VITE_DEMO_MODE=false
 VITE_API_URL=http://localhost:8000
 ```
 

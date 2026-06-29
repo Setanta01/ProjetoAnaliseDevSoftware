@@ -102,8 +102,8 @@ validar as respostas reais, permissões e nomes de campos.
 
 O frontend ja possui telas para **Meus Projetos**, **Projetos Admin**, Board,
 Backlog, Membros, Historico de Sprints, criacao de card, detalhe de card e
-Planning Poker. Parte delas ainda usa contratos antigos ou demo-only, como
-rotas `/tasks/...`, status `CONCLUIDA` no historico e fixtures normalizadas.
+Planning Poker. Parte delas ainda usa contratos antigos, como rotas
+`/tasks/...`, status `CONCLUIDA` no historico e fixtures normalizadas.
 
 ## Interpretacao Recomendada
 

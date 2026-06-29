@@ -124,7 +124,6 @@ npm run dev
 `frontend/.env.local` uses real-backend mode:
 
 ```env
-VITE_DEMO_MODE=false
 VITE_API_URL=http://localhost:8000
 ```
 

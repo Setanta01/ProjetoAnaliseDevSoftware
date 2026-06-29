@@ -120,7 +120,7 @@
 | `GET`       | `/cards/<id>/vinculos/`           | `[MEMBRO]`   | Lista vínculos do card.                                            |
 | `POST`      | `/cards/<id>/vinculos/`           | `[GER]`      | **Payload:** `card_destino_id`, `tipo_vinculo`.                    |
 | `DELETE`    | `/cards/vinculos/<id>/`           | `[GER]`      | Remove o vínculo.                                                  |
-| `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentario. **POST:** `texto`, `mencionados_ids`. Notifica participantes e usuarios mencionados do projeto. Em backlog, o POST e bloqueado. |
+| `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentario. **POST:** `texto`, `mencionados_ids`. Notifica participantes e usuarios mencionados do projeto. A resposta inclui `mencionados`. Em backlog, o POST e bloqueado. |
 | `PATCH/DEL` | `/cards/comentarios/<id>/`        | `[USER/GER]` | Edita ou remove o proprio comentario (Gerente remove qualquer um). |
 | `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card. Aceita imagem, video, PDF e documento de texto, ate 65 MB. Em backlog o POST e bloqueado. |
 | `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa imagem, video, PDF ou documento de texto num comentario especifico, ate 65 MB. |
@@ -132,8 +132,8 @@
 | -------- | -------------------------- | ---------- | ------------------------------------------------------------------------------ |
 | `POST`   | `/cards/<id>/validacao/`   | `[QA/ADMIN]` | **Payload:** `resultado` (APROVADO/REPROVADO), `observacao`. A UI libera a acao apenas quando o card esta em Review. `observacao` e obrigatoria para `REPROVADO`. |
 | `GET`    | `/cards/<id>/validacao/`   | `[MEMBRO]` | Lista histórico de validações.                                                 |
-| `POST`   | `/cards/<id>/impedimento/` | `[MEMBRO]` | **Payload:** `comentario`. Marca card como impedido.                           |
-| `DELETE` | `/cards/<id>/impedimento/` | `[MEMBRO]` | Remove o impedimento do card.                                                  |
+| `POST`   | `/cards/<id>/impedimento/` | `[RESP/GER]` | **Payload:** `comentario`. Marca card como impedido.                           |
+| `DELETE` | `/cards/<id>/impedimento/` | `[RESP/GER]` | Remove o impedimento do card.                                                  |
 
 ## 7. Mapeamento: Banco de Dados × Endpoints
 

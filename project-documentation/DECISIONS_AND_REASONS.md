@@ -74,8 +74,8 @@ the request to release horizontal space for the Kanban Board.
 
 **Decision:** Use one login action for all account types.
 
-**Reason:** The separate admin/user presentation in the prototype was stated to
-be demonstration-only. Authorization is determined after authentication.
+**Reason:** Authorization is determined after authentication. Separate login
+actions for admin and user would duplicate the same credential flow.
 
 ### First administrator bootstrap
 
@@ -94,15 +94,6 @@ temporary and has been removed from production authority.
 
 **Reason:** Public self-registration is intentionally unavailable after first
 boot; invited users still need a route for defining their credentials.
-
-### Local demo adapter
-
-**Decision:** Simulate API behavior in development rather than requiring Google
-OAuth, Resend, and populated backend data for frontend review.
-
-**Reason:** OAuth and email delivery test integrations, not most presentation
-states. Typed fixtures make visual and interaction review deterministic without
-inventing production backend APIs.
 
 ### Fixed Board columns for Sprint 2
 
@@ -220,9 +211,8 @@ and keeps future design changes centralized.
 
 ### React Query invalidation after mutations
 
-**Reason:** This matches the documented short-polling architecture and allows
-the same presentation components to work with demo and real API adapters.
-Card movement uses one narrow optimistic cache update because it is a frequent,
+**Reason:** This matches the documented short-polling architecture. Card
+movement uses one narrow optimistic cache update because it is a frequent,
 low-risk interaction. Other edits stay with mutation plus refetch/invalidation
 to keep the frontend simpler.
 
@@ -265,11 +255,6 @@ is created only when a valid, unused invitation exists for the returned email.
 **Reason:** Google authentication must not bypass the invitation-only account
 policy. The invitation determines whether the new account receives global admin
 access and is consumed after account creation.
-
-### Demo mode cannot be enabled in production builds
-
-**Reason:** Local fixtures and mock authentication must not become a production
-authentication bypass.
 
 ## Decisions Still Required
 

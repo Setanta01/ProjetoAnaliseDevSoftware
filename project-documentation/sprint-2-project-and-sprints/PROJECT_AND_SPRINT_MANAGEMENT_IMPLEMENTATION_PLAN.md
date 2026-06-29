@@ -191,8 +191,8 @@ equipe, sprints, cards, movimentacao, Planning Poker e encerramento.
 
 - Nao criar novo estado global para projeto/sprint se React Query e URL
   resolvem o fluxo.
-- Nao duplicar fixtures como fonte de verdade; demo mode deve seguir o contrato
-  real.
+- Nao duplicar fixtures como fonte de verdade; o contrato real da API deve
+  orientar a UI.
 - Nao esconder falhas de permissao no frontend; backend decide, frontend apenas
   comunica.
 - Nao adicionar WebSocket/Celery/Redis para Sprint 2.
