@@ -842,6 +842,36 @@ class Comentario(models.Model):
         return f'Comentário de {self.autor_id} em card={self.card_id}'
 
 
+class ComentarioMencao(models.Model):
+    """Tabela: comentarios_mencoes — usuarios mencionados em comentarios."""
+
+    id         = models.AutoField(primary_key=True)
+    comentario = models.ForeignKey(
+        Comentario, on_delete=models.CASCADE,
+        db_column='comentario_id',
+        related_name='mencoes',
+    )
+    usuario    = models.ForeignKey(
+        Usuario, on_delete=models.CASCADE,
+        db_column='usuario_id',
+        related_name='mencoes_em_comentarios',
+    )
+    criado_em  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'comentarios_mencoes'
+        managed  = False
+        constraints = [
+            models.UniqueConstraint(
+                fields=['comentario', 'usuario'],
+                name='uq_comentario_mencao',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Menção usuario={self.usuario_id} comentario={self.comentario_id}'
+
+
 # =============================================================================
 # ANEXOS
 # =============================================================================

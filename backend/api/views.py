@@ -42,6 +42,7 @@ from .models import (
     Estimativa,
     ValidacaoQA,
     Comentario,
+    ComentarioMencao,
     Anexo,
     NotificacaoUsuario,
     JustificativaPrazo,   # FIX (#2): import no topo (eliminou import local).
@@ -241,6 +242,7 @@ def _registrar_snapshot_sprint(sprint):
 
 
 def _serializar_comentario(c):
+    mencoes = getattr(c, 'mencoes', None)
     return {
         'id': c.id,
         'texto': c.texto,
@@ -251,6 +253,13 @@ def _serializar_comentario(c):
         'anexos': [
             _serializar_anexo(a)
             for a in c.anexos.all()
+        ],
+        'mencionados': [
+            {
+                'id': mencao.usuario_id,
+                'nome': mencao.usuario.nome,
+            }
+            for mencao in (mencoes.all() if mencoes is not None else [])
         ],
     }
 
@@ -318,6 +327,20 @@ def _ids_mencionados(request):
         except (TypeError, ValueError):
             continue
     return list(dict.fromkeys(mencionados))
+
+
+def _notificar_responsavel_atribuido(card, atribuido_por):
+    if not card.responsavel:
+        return
+    _enviar_email(
+        card.responsavel.email,
+        f'Card atribuído — {card.titulo}',
+        (
+            f'{atribuido_por.nome} atribuiu você ao card.\n\n'
+            f'Projeto: {card.projeto.nome}\n'
+            f'Card: {card.codigo and f"#{card.codigo}" or f"#{card.id}"} - {card.titulo}'
+        ),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1290,6 +1313,7 @@ def sprint_detail(request, sprint_id):
                 'checklists__itens',
                 'comentarios__autor',
                 'comentarios__anexos',
+                'comentarios__mencoes__usuario',
                 notifs_prefetch,
             )
         )
@@ -1532,6 +1556,8 @@ def projeto_cards(request, projeto_id):
 
     card = Card.objects.create(**card_kwargs)
     _registrar_historico(card, request.user, 'CRIACAO', f'Card criado como {tipo}.')
+    if card.responsavel_id:
+        _notificar_responsavel_atribuido(card, request.user)
 
     return Response(_serializar_card(card), status=status.HTTP_201_CREATED)
 
@@ -1676,6 +1702,7 @@ def card_detail(request, card_id):
         _registrar_historico(card, request.user, 'MUDANCA_COLUNA',
                              f'{coluna_anterior} → {nova_coluna.nome}')
 
+    notificar_responsavel = False
     if 'responsavel_id' in request.data:
         resp_id = request.data['responsavel_id']
         if resp_id is None:
@@ -1686,9 +1713,11 @@ def card_detail(request, card_id):
                 if not _eh_membro_do_projeto(novo_resp, projeto):
                     return Response({'detail': 'Responsável deve ser membro do projeto.'}, status=status.HTTP_400_BAD_REQUEST)
                 antigo = card.responsavel.nome if card.responsavel else 'Ninguém'
+                antigo_id = card.responsavel_id
                 card.responsavel = novo_resp
                 _registrar_historico(card, request.user, 'MUDANCA_RESPONSAVEL',
                                      f'{antigo} → {novo_resp.nome}')
+                notificar_responsavel = antigo_id != novo_resp.id
             except Usuario.DoesNotExist:
                 return Response({'detail': 'Responsável não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
@@ -1735,6 +1764,8 @@ def card_detail(request, card_id):
             card.pronto_para_estimativa = False
 
     card.save()
+    if notificar_responsavel:
+        _notificar_responsavel_atribuido(card, request.user)
     return Response(_serializar_card(card))
 
 
@@ -2165,7 +2196,7 @@ def card_comentarios(request, card_id):
     if request.method == 'GET':
         comentarios = Comentario.objects.filter(card=card).select_related(
             'autor'
-        ).prefetch_related('anexos').order_by('criado_em')
+        ).prefetch_related('anexos', 'mencoes__usuario').order_by('criado_em')
         return Response([_serializar_comentario(c) for c in comentarios])
 
     blocked = _bloquear_mutacao_backlog(card)
@@ -2183,7 +2214,19 @@ def card_comentarios(request, card_id):
         ativo=True,
         membros_projetos__projeto_id=card.projeto_id,
     ).distinct()
-    mencionados_emails = set(mencionados.exclude(pk=request.user.pk).values_list('email', flat=True))
+    mencionados = list(mencionados)
+    ComentarioMencao.objects.bulk_create(
+        [
+            ComentarioMencao(comentario=comentario, usuario=mencionado)
+            for mencionado in mencionados
+        ],
+        ignore_conflicts=True,
+    )
+    mencionados_emails = {
+        mencionado.email
+        for mencionado in mencionados
+        if mencionado.pk != request.user.pk
+    }
 
     destinatarios = set()
     if card.responsavel and card.responsavel != request.user:
@@ -2201,7 +2244,9 @@ def card_comentarios(request, card_id):
             f'{request.user.nome} comentou:\n\n{texto}',
         )
 
-    for mencionado in mencionados.exclude(pk=request.user.pk):
+    for mencionado in mencionados:
+        if mencionado.pk == request.user.pk:
+            continue
         _enviar_email(
             mencionado.email,
             f'Você foi mencionado em {card.codigo and f"#{card.codigo}" or f"card {card.id}"}',
@@ -2448,6 +2493,14 @@ def card_impedimento(request, card_id):
     blocked = _bloquear_mutacao_backlog(card)
     if blocked:
         return blocked
+
+    is_manager = request.user.admin or cargo == 'GERENTE'
+    is_assignee = card.responsavel_id == request.user.id
+    if not (is_manager or is_assignee):
+        return Response(
+            {'detail': 'Apenas Gerentes ou o responsável podem alterar impedimento do card.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     if request.method == 'POST':
         comentario = request.data.get('comentario', '').strip()

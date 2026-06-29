@@ -33,6 +33,7 @@ export interface ApiComment {
   criado_em: string
   editado_em?: string
   anexos?: Array<{ id: number; nome: string; url: string; mime_type?: string }>
+  mencionados?: Array<{ id: number; nome: string }>
 }
 
 export interface ApiChecklist {

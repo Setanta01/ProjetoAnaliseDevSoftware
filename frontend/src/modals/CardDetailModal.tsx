@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Bookmark, X } from 'lucide-react'
+import { Bookmark, Lock, Unlock, X } from 'lucide-react'
 import api from '@/api'
 import { UserAvatar } from '@/components/app/UserAvatar'
+import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Textarea } from '@/components/ui/textarea'
 import EstimateDifficultyModal from '@/modals/EstimateDifficultyModal'
 import { Checklist, CommentList, HistoryList, QaPanel } from '@/modals/card-detail/ActivitySections'
 import { ActivityComposer } from '@/modals/card-detail/ActivityComposer'
@@ -48,6 +50,9 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
   const [bugForm, setBugForm] = useState({ titulo: '', passos: '', resultadoEsperado: '' })
   const [showEstimate, setShowEstimate] = useState(false)
   const [editingCardId, setEditingCardId] = useState<number | null>(null)
+  const [blockDialogOpen, setBlockDialogOpen] = useState(false)
+  const [blockReason, setBlockReason] = useState('')
+  const [blockError, setBlockError] = useState('')
   const [saveError, setSaveError] = useState('')
   const [qaError, setQaError] = useState('')
   const [editForm, setEditForm] = useState<EditCardFormState>(emptyEditForm)
@@ -62,6 +67,7 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
   const editing = Boolean(cardId && editingCardId === cardId)
   const isBacklog = task ? isBacklogCard(task) : false
   const canEditCard = canManage || (currentRole === 'QA' && task?.tipo === 'BUG') || currentRole === 'ADMIN'
+  const canToggleBlocked = Boolean(task && !isBacklog && (canManage || currentRole === 'ADMIN' || task.responsavel_id === currentUserId))
   const isReviewCard = task?.status === 'REVISAO'
   const canValidateQA = isReviewCard && (currentRole === 'QA' || currentRole === 'ADMIN')
   const currentUserName = members.find((member) => member.id === currentUserId)?.nome ?? 'Usuário'
@@ -118,6 +124,25 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
       return api.patch<Task>(`/cards/${cardId}/`, { sprint_id: null }).then((response) => response.data)
     },
     onSuccess: invalidateCardData,
+  })
+
+  const toggleBlockedMutation = useMutation({
+    mutationFn: ({ blocked, comentario }: { blocked: boolean; comentario?: string }) => {
+      if (!cardId) throw new Error('Card não selecionado.')
+      if (blocked) return api.delete(`/cards/${cardId}/impedimento/`)
+      return api.post(`/cards/${cardId}/impedimento/`, { comentario })
+    },
+    onMutate: () => setSaveError(''),
+    onSuccess: async () => {
+      setBlockDialogOpen(false)
+      setBlockReason('')
+      setBlockError('')
+      await Promise.all([
+        invalidateCardData(),
+        queryClient.invalidateQueries({ queryKey: ['task-history', cardId] }),
+      ])
+    },
+    onError: (error) => setSaveError(getErrorMessage(error, 'Não foi possível alterar o bloqueio do card.')),
   })
 
   const validateQaMutation = useMutation({
@@ -198,6 +223,26 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
     validateQaMutation.mutate({ resultado, observacao })
   }
 
+  const toggleBlocked = () => {
+    if (!task) return
+    if (task.impedido) {
+      toggleBlockedMutation.mutate({ blocked: true })
+      return
+    }
+    setBlockError('')
+    setBlockReason('')
+    setBlockDialogOpen(true)
+  }
+
+  const submitBlock = () => {
+    const comentario = blockReason.trim()
+    if (!comentario) {
+      setBlockError('Informe o motivo do bloqueio.')
+      return
+    }
+    toggleBlockedMutation.mutate({ blocked: false, comentario })
+  }
+
   return (
     <Dialog open={Boolean(cardId)} onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent hideClose className="h-[85vh] max-h-[880px] max-w-6xl gap-0 overflow-hidden p-0">
@@ -207,7 +252,8 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
             <DialogDescription className="sr-only">Detalhes, comentários e subtarefas do card.</DialogDescription>
             <div className="grid h-full min-h-0 md:grid-cols-2">
               <section className="overflow-y-auto bg-card p-8">
-                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge></div><div className="flex items-center gap-2">{canEditCard && <Button size="sm" variant="outline" onClick={() => { setSaveError(''); if (editing) { setEditingCardId(null); return } setEditForm(formFromTask(task)); setEditingCardId(task.id) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}{canManage && task.sprint_id && <Button size="sm" variant="secondary" disabled={moveToBacklogMutation.isPending} onClick={() => moveToBacklogMutation.mutate()}>{moveToBacklogMutation.isPending ? 'Movendo...' : 'Mover para backlog'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
+                <div className="mb-7 flex items-center justify-between"><div className="flex items-center gap-3"><Bookmark className="h-4 w-4 text-muted-foreground" /><Badge variant="id">{task.codigo ?? `#${task.id}`}</Badge>{task.impedido && <Badge variant="danger">Bloqueado</Badge>}</div><div className="flex items-center gap-2">{canEditCard && <Button size="sm" variant="outline" onClick={() => { setSaveError(''); if (editing) { setEditingCardId(null); return } setEditForm(formFromTask(task)); setEditingCardId(task.id) }}>{editing ? 'Cancelar edição' : 'Editar'}</Button>}{canToggleBlocked && <Button size="sm" variant={task.impedido ? 'outline' : 'secondary'} disabled={toggleBlockedMutation.isPending} onClick={toggleBlocked}>{task.impedido ? <Unlock className="h-4 w-4" /> : <Lock className="h-4 w-4" />}{task.impedido ? 'Desbloquear' : 'Bloquear'}</Button>}{canManage && task.sprint_id && <Button size="sm" variant="secondary" disabled={moveToBacklogMutation.isPending} onClick={() => moveToBacklogMutation.mutate()}>{moveToBacklogMutation.isPending ? 'Movendo...' : 'Mover para backlog'}</Button>}<Button variant="ghost" size="icon" onClick={onClose}><X className="h-5 w-5" /></Button></div></div>
+                {saveError && !editing && <p className="mb-4 rounded-md border border-destructive/30 bg-danger-muted px-3 py-2 text-sm text-destructive">{saveError}</p>}
                 <h2 className="mb-8 text-2xl font-bold leading-tight text-card-foreground">{task.titulo}</h2>
                 {editing && <EditCardForm form={editForm} members={members} isBacklog={isBacklog} isSaving={saveCardMutation.isPending} error={saveError} onChange={setEditForm} onSave={saveCard} />}
                 <div className="mb-8 grid grid-cols-2 gap-x-8 gap-y-7">
@@ -233,6 +279,28 @@ export default function CardDetailModal({ cardId, canManage = false, currentUser
               </section>
             </div>
             {!isBacklog && <EstimateDifficultyModal task={task} open={showEstimate} canManage={canManage} onOpenChange={setShowEstimate} onDone={() => { void queryClient.refetchQueries({ queryKey: ['task', cardId], type: 'active' }) }} />}
+            <Dialog open={blockDialogOpen} onOpenChange={(open) => { setBlockDialogOpen(open); if (!open) { setBlockReason(''); setBlockError('') } }}>
+              <DialogContent className="max-w-md">
+                <DialogHeader>
+                  <DialogTitle>Bloquear card</DialogTitle>
+                  <DialogDescription>Informe o motivo para registrar o impedimento no histórico do card.</DialogDescription>
+                </DialogHeader>
+                {blockError && <Alert variant="destructive">{blockError}</Alert>}
+                <Textarea
+                  className="min-h-28"
+                  value={blockReason}
+                  onChange={(event) => { setBlockReason(event.target.value); setBlockError('') }}
+                  placeholder="Ex.: dependência externa, ambiente indisponível, dúvida de requisito..."
+                  autoFocus
+                />
+                <DialogFooter>
+                  <Button type="button" variant="outline" disabled={toggleBlockedMutation.isPending} onClick={() => setBlockDialogOpen(false)}>Cancelar</Button>
+                  <Button type="button" variant="destructive" disabled={toggleBlockedMutation.isPending} onClick={submitBlock}>
+                    {toggleBlockedMutation.isPending ? 'Bloqueando...' : 'Bloquear card'}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </>
         )}
       </DialogContent>

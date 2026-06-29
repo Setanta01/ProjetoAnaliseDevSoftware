@@ -445,6 +445,20 @@ CREATE TABLE comentarios (
 
 CREATE INDEX idx_comentarios_card ON comentarios(card_id);
 
+CREATE TABLE comentarios_mencoes (
+    id            SERIAL PRIMARY KEY,
+    comentario_id INT NOT NULL,
+    usuario_id    INT NOT NULL,
+    criado_em     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_comentario_mencao_comentario FOREIGN KEY (comentario_id) REFERENCES comentarios(id) ON DELETE CASCADE,
+    CONSTRAINT fk_comentario_mencao_usuario    FOREIGN KEY (usuario_id)    REFERENCES usuarios(id) ON DELETE CASCADE,
+    CONSTRAINT uq_comentario_mencao UNIQUE (comentario_id, usuario_id)
+);
+
+CREATE INDEX idx_comentarios_mencoes_comentario ON comentarios_mencoes(comentario_id);
+CREATE INDEX idx_comentarios_mencoes_usuario ON comentarios_mencoes(usuario_id);
+
 -- =============================================================
 -- ANEXOS (imagens e evidências de bug)
 -- =============================================================

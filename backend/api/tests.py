@@ -514,6 +514,60 @@ class Sprint3BacklogRuleTests(TestCase):
 
         self.assertEqual(data['projeto_id'], 10)
 
+    def test_comment_serializer_includes_mentions(self):
+        mentioned_user = SimpleNamespace(id=2, nome='Pessoa QA')
+        mention = SimpleNamespace(usuario_id=2, usuario=mentioned_user)
+        comment = SimpleNamespace(
+            id=5,
+            texto='Pode revisar?',
+            autor_id=1,
+            autor=SimpleNamespace(nome='Gerente'),
+            criado_em=None,
+            editado_em=None,
+            anexos=SimpleNamespace(all=lambda: []),
+            mencoes=SimpleNamespace(all=lambda: [mention]),
+        )
+
+        data = views._serializar_comentario(comment)
+
+        self.assertEqual(data['mencionados'], [{'id': 2, 'nome': 'Pessoa QA'}])
+
+    @patch('api.views._enviar_email')
+    def test_responsible_assignment_queues_email(self, send_email):
+        card = SimpleNamespace(
+            id=77,
+            codigo='ABCD',
+            titulo='Implementar filtro',
+            projeto=SimpleNamespace(nome='Projeto'),
+            responsavel=SimpleNamespace(email='dev@example.com'),
+        )
+        actor = SimpleNamespace(nome='Gerente')
+
+        views._notificar_responsavel_atribuido(card, actor)
+
+        send_email.assert_called_once()
+        self.assertEqual(send_email.call_args.args[0], 'dev@example.com')
+        self.assertIn('Card atribuído', send_email.call_args.args[1])
+
+    @patch('api.views._get_card_e_cargo')
+    def test_only_manager_or_assignee_can_toggle_impediment(self, get_card):
+        card = SimpleNamespace(sprint_id=11, responsavel_id=2)
+        get_card.return_value = (card, 'DEV', None)
+        request = self.factory.post(
+            '/api/cards/77/impedimento/',
+            {'comentario': 'Bloqueado'},
+            format='json',
+        )
+        force_authenticate(request, user=SimpleNamespace(id=1, admin=False, is_authenticated=True))
+
+        response = views.card_impedimento(request, 77)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.data['detail'],
+            'Apenas Gerentes ou o responsável podem alterar impedimento do card.',
+        )
+
 
 class MfaFlowTests(TestCase):
     def setUp(self):

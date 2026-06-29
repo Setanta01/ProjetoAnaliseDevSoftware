@@ -24,6 +24,7 @@ export function normalizeComment(comment: ApiComment): Comentario {
     criado_em: comment.criado_em,
     editado_em: comment.editado_em,
     anexos: comment.anexos ?? [],
+    mencionados: comment.mencionados ?? [],
   }
 }
 

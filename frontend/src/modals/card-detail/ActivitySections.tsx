@@ -1,4 +1,4 @@
-import { Bug, CheckCircle2, Clock3, Paperclip, Pencil, Trash2, XCircle } from 'lucide-react'
+import { AtSign, Bug, CheckCircle2, Clock3, Paperclip, Pencil, Trash2, XCircle } from 'lucide-react'
 import { UserAvatar } from '@/components/app/UserAvatar'
 import { Alert } from '@/components/ui/alert'
 import { Badge } from '@/components/ui/badge'
@@ -16,7 +16,7 @@ export function CommentList({ comments, currentUserId, canManage, onDelete }: { 
   const orderedComments = [...comments].sort((a, b) => new Date(b.criado_em).getTime() - new Date(a.criado_em).getTime())
   return <div className="space-y-4">{orderedComments.map((comment) => {
     const canDelete = canManage || comment.usuario_id === currentUserId
-    return <div key={comment.id} className="flex gap-3"><UserAvatar name={comment.usuario_nome} className="h-8 w-8" /><div className="flex-1"><div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><p><strong>{comment.usuario_nome}</strong> <span className="ml-2 text-xs text-muted-foreground">{formatDateTime(comment.criado_em)}</span></p>{canDelete && <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:bg-danger-muted hover:text-destructive" aria-label="Remover comentário" onClick={() => void onDelete(comment.id)}><Trash2 className="h-4 w-4" /></Button>}</div><div className="rounded-lg border border-border bg-card p-3 text-sm leading-relaxed text-card-foreground shadow-sm"><p>{comment.texto}</p>{Boolean(comment.anexos?.length) && <div className="mt-2 flex flex-wrap gap-2">{comment.anexos?.map((anexo) => <AttachmentLink key={anexo.id} anexo={anexo} />)}</div>}</div></div></div>
+    return <div key={comment.id} className="flex gap-3"><UserAvatar name={comment.usuario_nome} className="h-8 w-8" /><div className="flex-1"><div className="mb-1.5 flex items-center justify-between gap-3 text-sm"><p><strong>{comment.usuario_nome}</strong> <span className="ml-2 text-xs text-muted-foreground">{formatDateTime(comment.criado_em)}</span></p>{canDelete && <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:bg-danger-muted hover:text-destructive" aria-label="Remover comentário" onClick={() => void onDelete(comment.id)}><Trash2 className="h-4 w-4" /></Button>}</div><div className="rounded-lg border border-border bg-card p-3 text-sm leading-relaxed text-card-foreground shadow-sm"><p>{comment.texto}</p>{Boolean(comment.mencionados?.length) && <div className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><AtSign className="h-3.5 w-3.5" /><span>Mencionou</span>{comment.mencionados?.map((user) => <Badge key={user.id} variant="neutral">@{user.nome}</Badge>)}</div>}{Boolean(comment.anexos?.length) && <div className="mt-2 flex flex-wrap gap-2">{comment.anexos?.map((anexo) => <AttachmentLink key={anexo.id} anexo={anexo} />)}</div>}</div></div></div>
   })}</div>
 }
 

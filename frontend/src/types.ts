@@ -95,6 +95,7 @@ export interface Comentario {
   criado_em: string;
   editado_em?: string;
   anexos?: Anexo[];
+  mencionados?: Array<{ id: number; nome: string }>;
 }
 
 export interface Anexo {
