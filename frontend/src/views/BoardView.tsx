@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Filter, Plus, Users } from 'lucide-react'
+import { Filter, Plus } from 'lucide-react'
 import api from '@/api'
 import { KanbanColumn, KanbanTaskCard } from '@/components/app/Kanban'
 import { LoadingState } from '@/components/app/LoadingState'
@@ -10,11 +10,13 @@ import { ViewToggle, type ViewMode } from '@/components/app/ViewToggle'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { getSprintDeadlineState } from '@/lib/card-rules'
 import type { ProjectRole, SprintDetail, Task } from '@/types'
 
 interface BoardViewProps {
   sprintId: number | null
   projetoId: number | null
+  projectName?: string
   onOpenCard: (id: number) => void
   onNewCard: () => void
   canManage: boolean
@@ -25,13 +27,14 @@ interface BoardViewProps {
 const priorityWeight = { URGENTE: 4, ALTA: 3, MEDIA: 2, BAIXA: 1 } as const
 const VIEW_MODE_STORAGE_KEY = 'lazuli_board_view_mode'
 
-export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, currentUserId, currentRole }: BoardViewProps) {
+export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard, canManage, currentUserId, currentRole }: BoardViewProps) {
   const queryClient = useQueryClient()
   const [viewMode, setViewModeState] = useState<ViewMode>(() => {
     const saved = localStorage.getItem(VIEW_MODE_STORAGE_KEY)
     return saved === 'list' ? 'list' : 'kanban'
   })
   const [activeTaskId, setActiveTaskId] = useState<number | null>(null)
+  const [assignedToMeOnly, setAssignedToMeOnly] = useState(false)
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 8 } }))
   const { data: sprint, isLoading } = useQuery({
     queryKey: ['board', sprintId],
@@ -69,7 +72,8 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, 
   if (!sprintId) return <div className="p-8 text-center text-muted-foreground">Selecione uma sprint ativa.</div>
   const tasks = sprint?.cards ?? []
   const columns = sprint?.colunas ?? []
-  const sortedTasks = [...tasks].sort((a, b) => {
+  const visibleTasks = assignedToMeOnly && currentUserId ? tasks.filter((task) => task.responsavel_id === currentUserId) : tasks
+  const sortedTasks = [...visibleTasks].sort((a, b) => {
     const priorityDifference = priorityWeight[b.prioridade] - priorityWeight[a.prioridade]
     return priorityDifference || new Date(b.criado_em ?? 0).getTime() - new Date(a.criado_em ?? 0).getTime()
   })
@@ -109,13 +113,12 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, 
 
   const activeTask = activeTaskId ? tasks.find((task) => task.id === activeTaskId) : undefined
   const canCreateCard = canManage || currentRole === 'QA' || currentRole === 'ADMIN'
-
   return (
     <main className="flex h-full flex-col overflow-hidden px-4 pt-5 xl:px-5">
       <div className="mx-auto flex h-full w-full max-w-[1700px] flex-col overflow-hidden">
         <header className="mb-6 flex shrink-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div><div className="mb-1 flex items-center gap-3"><Badge variant="info">Sprint Ativa</Badge></div><h1 className="text-3xl font-bold tracking-tight text-foreground">Board {sprint?.nome ?? ''}</h1></div>
-          <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant="ghost" size="icon" aria-label="Membros"><Users className="h-5 w-5" /></Button><Button variant="outline"><Filter className="h-4 w-4" /> Filtrar</Button>{canCreateCard && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> {currentRole === 'QA' && !canManage ? 'Novo Bug' : 'Nova Task'}</Button>}</div>
+          <div><div className="mb-1 flex min-w-0 items-center gap-3"><Badge variant="info">Sprint Ativa</Badge>{projectName && <span className="truncate text-sm font-medium text-muted-foreground">{projectName}</span>}</div><h1 className="text-3xl font-bold tracking-tight text-foreground">Board {sprint?.nome ?? ''}</h1></div>
+          <div className="flex flex-wrap items-center gap-3"><ViewToggle value={viewMode} onChange={setViewMode} /><Button variant={assignedToMeOnly ? 'secondary' : 'outline'} disabled={!currentUserId} onClick={() => setAssignedToMeOnly((value) => !value)}><Filter className="h-4 w-4" /> Minhas tarefas</Button>{canCreateCard && <Button onClick={onNewCard}><Plus className="h-4 w-4" /> {currentRole === 'QA' && !canManage ? 'Novo Bug' : 'Nova Task'}</Button>}</div>
         </header>
         {isLoading ? (
           <LoadingState label="Carregando quadro..." />
@@ -132,7 +135,52 @@ export default function BoardView({ sprintId, onOpenCard, onNewCard, canManage, 
             <DragOverlay dropAnimation={null}>{activeTask && <KanbanTaskCard task={activeTask} isOverlay onClick={() => undefined} />}</DragOverlay>
           </DndContext>
         ) : (
-          <div className="mb-6 flex-1 overflow-y-auto rounded-lg border border-border bg-card"><Table><TableHeader><TableRow><TableHead>ID</TableHead><TableHead>Título</TableHead><TableHead>Tipo</TableHead><TableHead>Prioridade</TableHead><TableHead>Coluna</TableHead><TableHead>Pontos</TableHead></TableRow></TableHeader><TableBody className="[&_tr:last-child]:border-b">{sortedTasks.map((task) => <TableRow key={task.id} className="cursor-pointer border-border" onClick={() => void openCard(task.id)}><TableCell className="font-mono text-muted-foreground">{task.codigo ?? `#${task.id}`}</TableCell><TableCell className="font-semibold">{task.titulo}</TableCell><TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell><TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell><TableCell>{task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status}</TableCell><TableCell>{task.estimativa_consolidada ?? '-'}</TableCell></TableRow>)}</TableBody></Table></div>
+          <div className="mb-6 flex-1 overflow-auto rounded-lg border border-border bg-card">
+            <Table className="min-w-[980px] table-fixed">
+              <colgroup>
+                <col className="w-28" />
+                <col />
+                <col className="w-24" />
+                <col className="w-32" />
+                <col className="w-32" />
+                <col className="w-20" />
+              </colgroup>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Título / Tags</TableHead>
+                  <TableHead>Tipo</TableHead>
+                  <TableHead>Prioridade</TableHead>
+                  <TableHead>Coluna</TableHead>
+                  <TableHead className="text-center">Pontos</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="[&_tr:last-child]:border-b">
+                {sortedTasks.map((task) => {
+                  const deadline = getSprintDeadlineState(task)
+                  const columnName = task.coluna_nome ?? columns.find((column) => column.id === task.coluna_id)?.nome ?? task.status
+
+                  return (
+                    <TableRow key={task.id} className="cursor-pointer border-border" onClick={() => void openCard(task.id)}>
+                      <TableCell className="font-mono text-muted-foreground">{task.codigo ?? `#${task.id}`}</TableCell>
+                      <TableCell>
+                        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                          <span className="min-w-0 truncate font-semibold" title={task.titulo}>{task.titulo}</span>
+                          {task.impedido && <Badge variant="danger" className="shrink-0">Bloqueado</Badge>}
+                          {deadline?.kind === 'late' && <Badge variant="warning" className="shrink-0">Atrasado</Badge>}
+                          {task.pronto_para_estimativa && !task.estimativa_consolidada && <Badge variant="planning" className="shrink-0">Planning Poker</Badge>}
+                        </div>
+                      </TableCell>
+                      <TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell>
+                      <TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell>
+                      <TableCell className="truncate whitespace-nowrap" title={columnName}>{columnName}</TableCell>
+                      <TableCell className="text-center font-semibold">{task.estimativa_consolidada ?? '-'}</TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
         )}
       </div>
     </main>

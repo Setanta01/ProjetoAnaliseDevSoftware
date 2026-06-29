@@ -122,6 +122,10 @@
   [aria-disabled="true"] {
     cursor: not-allowed;
   }
+
+  #bit-notification-bar {
+    pointer-events: none !important;
+  }
 }
 
 @layer utilities {
