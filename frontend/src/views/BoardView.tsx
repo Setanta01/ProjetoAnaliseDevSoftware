@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Filter, Plus } from 'lucide-react'
+import { CalendarDays, Filter, Plus } from 'lucide-react'
 import api from '@/api'
 import { KanbanColumn, KanbanTaskCard } from '@/components/app/Kanban'
 import { LoadingState } from '@/components/app/LoadingState'
@@ -140,6 +140,7 @@ export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard
               <colgroup>
                 <col className="w-28" />
                 <col />
+                <col className="w-28" />
                 <col className="w-24" />
                 <col className="w-32" />
                 <col className="w-32" />
@@ -149,6 +150,7 @@ export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard
                 <TableRow>
                   <TableHead>ID</TableHead>
                   <TableHead>Título / Tags</TableHead>
+                  <TableHead>Entrega</TableHead>
                   <TableHead>Tipo</TableHead>
                   <TableHead>Prioridade</TableHead>
                   <TableHead>Coluna</TableHead>
@@ -170,6 +172,13 @@ export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard
                           {deadline?.kind === 'late' && <Badge variant="warning" className="shrink-0">Atrasado</Badge>}
                           {task.pronto_para_estimativa && !task.estimativa_consolidada && <Badge variant="planning" className="shrink-0">Planning Poker</Badge>}
                         </div>
+                      </TableCell>
+                      <TableCell>
+                        {task.due_date ? (
+                          <span className="inline-flex items-center gap-1 text-xs font-semibold text-muted-foreground"><CalendarDays className="h-3.5 w-3.5" />Sprint</span>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">Sem vínculo</span>
+                        )}
                       </TableCell>
                       <TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell>
                       <TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell>
