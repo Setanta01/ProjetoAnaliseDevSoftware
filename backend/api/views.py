@@ -134,6 +134,13 @@ def _registrar_historico(card, usuario, tipo, detalhe=''):
     CardHistorico.objects.create(card=card, usuario=usuario, acao=acao)
 
 
+def _motivo_impedimento_ativo(card):
+    if not getattr(card, 'impedido', False):
+        return None
+    historico = CardHistorico.objects.filter(card=card, acao__startswith='IMPEDIMENTO:').order_by('-alterado_em').first()
+    return historico.detalhe if historico else None
+
+
 def _enviar_email(destinatario, assunto, corpo):
     """Mantém um ponto único para os disparos existentes da API."""
     enviar_email(destinatario, assunto, corpo)
@@ -193,6 +200,7 @@ def _serializar_card(card, tem_novidade=False):
         'due_date': card.due_date,
         'estimativa_consolidada': card.estimativa_consolidada,
         'impedido': card.impedido,
+        'impedimento_motivo': _motivo_impedimento_ativo(card),
         'pronto_para_estimativa': card.pronto_para_estimativa,
         'tem_novidade': tem_novidade,
         'criado_em': card.criado_em,
@@ -327,6 +335,17 @@ def _ids_mencionados(request):
         except (TypeError, ValueError):
             continue
     return list(dict.fromkeys(mencionados))
+
+
+def _qa_pode_mover_review_aprovado(card, nova_coluna, cargo):
+    if cargo != 'QA':
+        return False
+    if not card.coluna or card.coluna.nome != COLUNA_VALIDACAO_NOME:
+        return False
+    if nova_coluna.nome != 'Done' and not nova_coluna.e_final:
+        return False
+    ultima_validacao = ValidacaoQA.objects.filter(card=card).order_by('-criado_em').first()
+    return bool(ultima_validacao and ultima_validacao.resultado == 'APROVADO')
 
 
 def _notificar_responsavel_atribuido(card, atribuido_por):
@@ -1314,6 +1333,7 @@ def sprint_detail(request, sprint_id):
                 'comentarios__autor',
                 'comentarios__anexos',
                 'comentarios__mencoes__usuario',
+                'validacoes',
                 notifs_prefetch,
             )
         )
@@ -1344,6 +1364,9 @@ def sprint_detail(request, sprint_id):
             comentarios_data = [_serializar_comentario(c) for c in comentarios_ordenados]
 
             card_dict = _serializar_card(card, tem_novidade=tem_novidade)
+            validacoes_ordenadas = sorted(card.validacoes.all(), key=lambda v: v.criado_em)
+            if validacoes_ordenadas:
+                card_dict['ultima_validacao_resultado'] = validacoes_ordenadas[-1].resultado
             card_dict['checklists']    = checklists_data
             card_dict['comentarios']   = comentarios_data
             cards_data.append(card_dict)
@@ -1638,7 +1661,7 @@ def card_detail(request, card_id):
 
     if simple_fields_requested and not (is_manager or can_edit_bug):
         return Response({'detail': 'Apenas Gerentes podem editar dados do card. QA pode editar BUG.'}, status=status.HTTP_403_FORBIDDEN)
-    if column_requested and not (is_manager or is_assignee):
+    if column_requested and not (is_manager or is_assignee or (cargo == 'QA' and card.coluna and card.coluna.nome == COLUNA_VALIDACAO_NOME)):
         return Response({'detail': 'Apenas Gerentes ou o responsável podem mover o card.'}, status=status.HTTP_403_FORBIDDEN)
     if responsible_requested and not (is_manager or can_edit_bug):
         requested_responsavel = request.data['responsavel_id']
@@ -1689,6 +1712,12 @@ def card_detail(request, card_id):
             nova_coluna = ColunasBoard.objects.get(pk=request.data['coluna_id'], projeto=projeto)
         except ColunasBoard.DoesNotExist:
             return Response({'detail': 'Coluna não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if not (is_manager or is_assignee) and not _qa_pode_mover_review_aprovado(card, nova_coluna, cargo):
+            return Response(
+                {'detail': 'QA só pode mover cards aprovados de Review para Done.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
 
         if card.coluna and card.coluna.nome == COLUNA_VALIDACAO_NOME and not is_assignee:
             if cargo not in ('QA', 'GERENTE') and not request.user.admin:

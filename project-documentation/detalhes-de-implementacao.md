@@ -55,6 +55,12 @@ evitar desatualizacao visual entre mutacoes e troca de abas.
   indicacao visual continue aparecendo apos reload/polling.
 - Impedimento de card pode ser marcado ou removido apenas por gerente/admin ou
   pelo responsavel atual do card.
+- O motivo ativo de impedimento nao usa coluna nova: enquanto `impedido=true`,
+  o backend deriva `impedimento_motivo` do ultimo registro de historico com
+  acao de impedimento. Ao desbloquear o card, esse motivo deixa de ser exposto.
+- O board recebe `ultima_validacao_resultado` no payload agregado da sprint para
+  permitir que a UI habilite a movimentacao de `Review` para `Done` quando o QA
+  aprovar o card. A API ainda valida a regra no `PATCH /api/cards/<id>/`.
 
 ## Anexos em Cards e Comentarios
 

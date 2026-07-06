@@ -486,7 +486,9 @@ class Sprint3BacklogRuleTests(TestCase):
 
         self.assertIsNone(response)
 
-    def test_card_serializer_includes_project_id_for_member_queries(self):
+    @patch('api.views.CardHistorico')
+    def test_card_serializer_includes_project_id_for_member_queries(self, historico_model):
+        historico_model.objects.filter.return_value.order_by.return_value.first.return_value = None
         card = SimpleNamespace(
             id=77,
             codigo='ABCD',
@@ -513,6 +515,95 @@ class Sprint3BacklogRuleTests(TestCase):
         data = views._serializar_card(card)
 
         self.assertEqual(data['projeto_id'], 10)
+
+    @patch('api.views.CardHistorico')
+    def test_card_serializer_includes_active_impediment_reason(self, historico_model):
+        historico_model.objects.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(detalhe='Aguardando credenciais.')
+        card = SimpleNamespace(
+            id=77,
+            codigo='ABCD',
+            titulo='Card bloqueado',
+            descricao='',
+            criterios_aceitacao='',
+            tipo='TAREFA',
+            prioridade='MEDIA',
+            coluna_id=1,
+            coluna=SimpleNamespace(nome='To do'),
+            sprint_id=11,
+            sprint=SimpleNamespace(data_inicio=None),
+            projeto_id=10,
+            responsavel_id=None,
+            responsavel=None,
+            due_date=None,
+            estimativa_consolidada=None,
+            impedido=True,
+            pronto_para_estimativa=False,
+            criado_em=None,
+            atualizado_em=None,
+        )
+
+        data = views._serializar_card(card)
+
+        self.assertEqual(data['impedimento_motivo'], 'Aguardando credenciais.')
+
+    @patch('api.views._serializar_card', return_value={'id': 77})
+    @patch('api.views._registrar_historico')
+    @patch('api.views.ValidacaoQA')
+    @patch('api.views.ColunasBoard')
+    @patch('api.views.Card')
+    @patch('api.views._get_projeto_ou_403')
+    def test_qa_can_move_approved_review_card_to_done(self, get_project, card_model, coluna_model, validacao_model, registrar, serializar):
+        get_project.return_value = (self.project, 'QA', None)
+        review = SimpleNamespace(nome='Review')
+        done = SimpleNamespace(nome='Done', e_final=True)
+        card = SimpleNamespace(
+            id=77,
+            projeto_id=10,
+            sprint_id=11,
+            sprint=None,
+            tipo='TAREFA',
+            responsavel_id=99,
+            coluna=review,
+            save=MagicMock(),
+        )
+        card_model.objects.select_related.return_value.get.return_value = card
+        coluna_model.objects.get.return_value = done
+        validacao_model.objects.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(resultado='APROVADO')
+        request = self.factory.patch('/api/cards/77/', {'coluna_id': 4}, format='json')
+        force_authenticate(request, user=SimpleNamespace(id=2, admin=False, is_authenticated=True))
+
+        response = views.card_detail(request, 77)
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(card.coluna, done)
+        card.save.assert_called_once()
+        registrar.assert_called_once()
+        serializar.assert_called_once_with(card)
+
+    @patch('api.views.ValidacaoQA')
+    @patch('api.views.ColunasBoard')
+    @patch('api.views.Card')
+    @patch('api.views._get_projeto_ou_403')
+    def test_qa_cannot_move_unapproved_review_card_to_done(self, get_project, card_model, coluna_model, validacao_model):
+        get_project.return_value = (self.project, 'QA', None)
+        card = SimpleNamespace(
+            id=77,
+            projeto_id=10,
+            sprint_id=11,
+            tipo='TAREFA',
+            responsavel_id=99,
+            coluna=SimpleNamespace(nome='Review'),
+        )
+        card_model.objects.select_related.return_value.get.return_value = card
+        coluna_model.objects.get.return_value = SimpleNamespace(nome='Done', e_final=True)
+        validacao_model.objects.filter.return_value.order_by.return_value.first.return_value = SimpleNamespace(resultado='REPROVADO')
+        request = self.factory.patch('/api/cards/77/', {'coluna_id': 4}, format='json')
+        force_authenticate(request, user=SimpleNamespace(id=2, admin=False, is_authenticated=True))
+
+        response = views.card_detail(request, 77)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.data['detail'], 'QA só pode mover cards aprovados de Review para Done.')
 
     def test_comment_serializer_includes_mentions(self):
         mentioned_user = SimpleNamespace(id=2, nome='Pessoa QA')

@@ -74,7 +74,7 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos da 
 
 ### Gestão de Exceções de Prazo e Impedimentos
 1. Quando uma entrega exige renegociação e uma nova data de vencimento (`due_date`) é proposta, a API intercepta a request e exige que no Payload haja obrigatoriamente a explicação `justificativa_prazo`. Sem o comentário, a modificação falha. O relato será gravado e anexado ao log da alteração.
-2. Caso o Dev fique "blockado" por questões externas, ele aciona o modo de bloqueio (`POST /api/cards/<id>/impedimento/`), provendo o relato do porquê o Card travou. O Card piscará no Board e ficará em evidência, marcando a propriedade booleana como travado.
+2. Caso o Dev fique "blockado" por questões externas, ele aciona o modo de bloqueio (`POST /api/cards/<id>/impedimento/`), provendo o relato do porquê o Card travou. O card recebe uma sinalizacao visual de bloqueio e o detalhe do card exibe a justificativa enquanto o impedimento estiver ativo.
 
 ### Indicadores Visuais (Stamps/Flags)
 No front-end, a visualização condensada (a face do card na coluna, antes de abrir os detalhes) possui stamps que traduzem campos lógicos em contexto visual útil, incluindo:
@@ -96,8 +96,9 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 1. A tarefa evolui, e o responsável empurra para a coluna sistêmica fixa de **Review**, exibida na interface como a area de **Validação** do card.
 2. **A Trava Sistêmica do Processo:** O Frontend deve barrar e o Backend validar rigidamente. Uma vez na coluna de validacao, somente usuarios atrelados sob o papel de `QA` (ou o proprio dono geral do projeto `GERENTE`) dispõem da credencial de autorizacao para executar comandos de mudança que arrastem esse `card_id` para fora dessa coluna.
 3. O QA toma o card, afere seu comportamento nas suas test suites e aciona (`POST /api/cards/<id>/validacao/`), chancelando o trabalho com um status estrito ENUM de `APROVADO` ou `REPROVADO`.
-4. Caso validado como Negado (`REPROVADO`), ele recebe o sinal verde para arrastar fisicamente o Card de volta para as Colunas de andamento ou devidas correções ao Dev.
-5. Em eventos catastróficos onde a "Tarefa" gerou uma pane isolada (Bug formal), o QA poderá criar um Card novo do tipo `tipo: BUG` (onde os payloads aceitam informações aprofundadas como Passos de Reprodução e Resultado Esperado), e no mesmo instante submetem à interface um Vínculo apontando para a "Tarefa X" (`POST /api/cards/<id>/vinculos/` com Tipo Vinculo de Natureza `BLOQUEIA`).
+4. Caso validado como `APROVADO`, o QA pode mover o card de `Review` para `Done`, mantendo o backend como fonte final da permissao.
+5. Caso validado como `REPROVADO`, o QA pode devolver fisicamente o card para as colunas de andamento ou devidas correções ao Dev.
+6. Em eventos catastróficos onde a "Tarefa" gerou uma pane isolada (Bug formal), o QA poderá criar um Card novo do tipo `tipo: BUG` (onde os payloads aceitam informações aprofundadas como Passos de Reprodução e Resultado Esperado), e no mesmo instante submetem à interface um Vínculo apontando para a "Tarefa X" (`POST /api/cards/<id>/vinculos/` com Tipo Vinculo de Natureza `BLOQUEIA`).
 
 ---
 
