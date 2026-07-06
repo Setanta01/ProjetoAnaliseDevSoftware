@@ -16,16 +16,21 @@ export interface Projeto {
   descricao?: string;
   criado_em?: string;
   member_count?: number;
+  membros?: number;
   status?: string;
+  arquivado?: boolean;
+  cargo?: ProjectRole;
   meu_cargo?: ProjectRole;
 }
 
 export interface Sprint {
   id: number;
   nome: string;
-  status: "PLANEJADA" | "ATIVA" | "CONCLUIDA";
+  status: "PLANEJADA" | "ATIVA" | "ENCERRADA";
   projeto_id: number;
+  total_cards?: number;
   total_tasks?: number;
+  total_bugs?: number;
   concluidas?: number;
   progresso?: number;
   data_inicio?: string;
@@ -37,12 +42,16 @@ export interface Task {
   id: number;
   titulo: string;
   descricao?: string;
+  criterios_aceitacao?: string;
   status: TaskStatus;
   prioridade: Prioridade;
   responsavel_id?: number;
   responsavel_nome?: string;
   sprint_id?: number;
+  sprint_data_inicio?: string;
   projeto_id?: number;
+  coluna_id?: number;
+  coluna_nome?: string;
   backlog_id?: number;
   posicao?: number;
   criado_em?: string;
@@ -50,7 +59,6 @@ export interface Task {
   tipo?: CardType;
   due_date?: string;
   estimativa_consolidada?: number;
-  criterios_aceitacao?: string;
   impedido?: boolean;
   pronto_para_estimativa?: boolean;
   tem_novidade?: boolean;
@@ -58,6 +66,13 @@ export interface Task {
   aguardando_qa?: boolean;
   passos_reproducao?: string;
   resultado_esperado?: string;
+  card_origem_id?: number | null;
+  bugs_gerados?: Array<{
+    id: number;
+    codigo?: string;
+    titulo: string;
+    status?: TaskStatus;
+  }>;
 }
 
 export interface Subtask {
@@ -79,6 +94,15 @@ export interface Comentario {
   texto: string;
   criado_em: string;
   editado_em?: string;
+  anexos?: Anexo[];
+  mencionados?: Array<{ id: number; nome: string }>;
+}
+
+export interface Anexo {
+  id: number;
+  nome: string;
+  url: string;
+  mime_type?: string;
 }
 
 export interface ChecklistItem {
@@ -86,6 +110,25 @@ export interface ChecklistItem {
   task_id: number;
   titulo: string;
   concluido: boolean;
+}
+
+export interface CardHistorico {
+  id: number;
+  card_id?: number;
+  tipo: string;
+  detalhe?: string;
+  usuario_id?: number;
+  usuario_nome?: string;
+  criado_em: string;
+}
+
+export interface ValidacaoQA {
+  id: number;
+  resultado: "APROVADO" | "REPROVADO";
+  observacao?: string;
+  qa_id?: number;
+  qa_nome?: string;
+  criado_em: string;
 }
 
 export interface ProjectMember {
@@ -100,9 +143,31 @@ export interface Usuario {
   id: number;
   nome: string;
   email: string;
-  cargo: Cargo;
+  cargo?: Cargo;
+  admin?: boolean;
   ativo: boolean;
   criado_em?: string;
+}
+
+export interface BoardColumn {
+  id: number;
+  nome: string;
+  posicao: number;
+  e_inicial?: boolean;
+  e_final?: boolean;
+}
+
+export interface SprintDetail extends Sprint {
+  colunas: BoardColumn[];
+  cards: Task[];
+}
+
+export interface Estimativa {
+  usuario_id: number;
+  usuario_nome: string;
+  valor: string | null;
+  votou: boolean;
+  revelada: boolean;
 }
 
 export interface AdminStats {
@@ -116,7 +181,7 @@ export type Cargo = "ADMIN" | "GERENTE" | "DEV" | "QA";
 export type ProjectRole = "GERENTE" | "DEV" | "QA";
 export type CardType = "TAREFA" | "BUG";
 export type TaskStatus = "BACKLOG" | "TODO" | "EM_ANDAMENTO" | "REVISAO" | "CONCLUIDO" | "BLOQUEADO";
-export type Prioridade = "BAIXA" | "MEDIA" | "ALTA" | "CRITICA";
+export type Prioridade = "BAIXA" | "MEDIA" | "ALTA" | "URGENTE";
 
 export const TASK_STATUS_LABEL: Record<TaskStatus, string> = {
   BACKLOG:      "Backlog",
@@ -131,5 +196,5 @@ export const PRIORIDADE_LABEL: Record<Prioridade, string> = {
   BAIXA:   "Baixa",
   MEDIA:   "Média",
   ALTA:    "Alta",
-  CRITICA: "Urgente",
+  URGENTE: "Urgente",
 };

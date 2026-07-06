@@ -70,10 +70,9 @@ npm install
 cp .env.example .env.local
 ```
 
-Para usar o backend real, mantenha:
+Configure a URL do backend:
 
 ```env
-VITE_DEMO_MODE=false
 VITE_API_URL=http://localhost:8000
 ```
 
@@ -177,5 +176,5 @@ npm run build
 ```
 
 Detalhes de ambiente, autenticação e e-mail estão em
-`project-documentation/LOCAL_SETUP_AND_AUTH_FLOW.md`. Segredos locais devem
-permanecer em arquivos ignorados pelo Git.
+`project-documentation/auth/LOCAL_SETUP_AND_AUTH_FLOW.md`. Segredos locais
+devem permanecer em arquivos ignorados pelo Git.

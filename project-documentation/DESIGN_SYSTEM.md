@@ -12,7 +12,7 @@ These requirements supersede prototype-only assumptions elsewhere in this docume
 * Admin users have both **Meus Projetos** and a separate **Projetos Admin** route.
 * Sprint Board, Backlog, team members, and sprint history navigation is hidden until a project is selected.
 * The desktop sidebar retains the documented `w-64` expanded state, but is retractable to an icon rail to increase Board space.
-* Login demonstrations must use one real login form. Separate admin/user login actions shown in early mockups were demo-only.
+* Login uses one real login form. Separate admin/user login actions shown in early mockups were discarded.
 * First-administrator setup and invitation activation screens are part of the authentication surface even though they are absent from the prototype images.
 
 The goal of this design system is to preserve the prototype’s appearance while making the implementation cleaner, reusable, and maintainable with React, Tailwind CSS, and shadcn/ui.

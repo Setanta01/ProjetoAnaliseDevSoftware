@@ -1,10 +1,8 @@
 import axios, { AxiosError, type InternalAxiosRequestConfig } from 'axios'
-import { demoAdapter } from '@/demo/store'
-import { apiBaseUrl, isDemoMode } from '@/lib/env'
+import { apiBaseUrl } from '@/lib/env'
 
 const api = axios.create({
   baseURL: apiBaseUrl,
-  ...(isDemoMode ? { adapter: demoAdapter } : {}),
 })
 
 interface RetryableRequestConfig extends InternalAxiosRequestConfig {
@@ -35,14 +33,14 @@ async function refreshAccessToken(): Promise<string> {
 
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('access_token')
-  if (token && !isDemoMode) config.headers.Authorization = `Bearer ${token}`
+  if (token) config.headers.Authorization = `Bearer ${token}`
   return config
 })
 
 api.interceptors.response.use(
   (response) => response,
   async (error: AxiosError) => {
-    if (isDemoMode || error.response?.status !== 401 || !error.config) throw error
+    if (error.response?.status !== 401 || !error.config) throw error
 
     const config = error.config as RetryableRequestConfig
     const requestPath = config.url ?? ''

@@ -423,6 +423,7 @@ class Card(models.Model):
     ]
 
     id          = models.AutoField(primary_key=True)
+    codigo      = models.CharField(max_length=4, unique=True)
     projeto     = models.ForeignKey(
         Projeto, on_delete=models.CASCADE,
         db_column='projeto_id',
@@ -442,6 +443,7 @@ class Card(models.Model):
     tipo        = models.CharField(max_length=10, choices=TIPO_CHOICES, default='TAREFA')
     titulo      = models.CharField(max_length=200)
     descricao   = models.TextField(blank=True, null=True)
+    criterios_aceitacao = models.TextField(blank=True, null=True)
     prioridade  = models.CharField(
         max_length=10, choices=PRIORIDADE_CHOICES, default='MEDIA'
     )
@@ -497,6 +499,43 @@ class Card(models.Model):
             return 'CONCLUIDO' if self.coluna.e_final else 'ABERTO'
         except Exception:
             return 'ABERTO'
+
+
+class SprintCardSnapshot(models.Model):
+    """Snapshot independente dos cards no momento de encerramento da sprint."""
+
+    id = models.AutoField(primary_key=True)
+    sprint = models.ForeignKey(
+        Sprint, on_delete=models.CASCADE,
+        db_column='sprint_id',
+        related_name='card_snapshots',
+    )
+    card_original_id = models.IntegerField()
+    codigo = models.CharField(max_length=20, blank=True, null=True)
+    titulo = models.CharField(max_length=200)
+    descricao = models.TextField(blank=True, null=True)
+    tipo = models.CharField(max_length=10)
+    prioridade = models.CharField(max_length=10)
+    status = models.CharField(max_length=20)
+    coluna_nome = models.CharField(max_length=100, blank=True, null=True)
+    responsavel_nome = models.CharField(max_length=150, blank=True, null=True)
+    due_date = models.DateField(null=True, blank=True)
+    estimativa_consolidada = models.IntegerField(null=True, blank=True)
+    criado_em = models.DateTimeField()
+    snapshot_em = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'sprint_card_snapshots'
+        managed = False
+        constraints = [
+            models.UniqueConstraint(
+                fields=['sprint', 'card_original_id'],
+                name='uq_sprint_card_snapshot',
+            )
+        ]
+
+    def __str__(self):
+        return f'Snapshot sprint={self.sprint_id} card={self.card_original_id}'
 
 
 # =============================================================================
@@ -631,8 +670,8 @@ class JustificativaPrazo(models.Model):
         db_column='usuario_id',
         related_name='justificativas_prazo',
     )
-    due_date_anterior = models.DateField()
-    due_date_nova     = models.DateField()
+    due_date_anterior = models.DateField(null=True, blank=True)
+    due_date_nova     = models.DateField(null=True, blank=True)
     justificativa     = models.TextField()
     criado_em         = models.DateTimeField(auto_now_add=True)
 
@@ -717,7 +756,7 @@ class Estimativa(models.Model):
         db_column='usuario_id',
         related_name='estimativas',
     )
-    valor         = models.IntegerField()
+    valor         = models.CharField(max_length=8)
     revelada      = models.BooleanField(default=False)
     criado_em     = models.DateTimeField(auto_now_add=True)
     atualizado_em = models.DateTimeField(auto_now=True)
@@ -803,6 +842,36 @@ class Comentario(models.Model):
         return f'Comentário de {self.autor_id} em card={self.card_id}'
 
 
+class ComentarioMencao(models.Model):
+    """Tabela: comentarios_mencoes — usuarios mencionados em comentarios."""
+
+    id         = models.AutoField(primary_key=True)
+    comentario = models.ForeignKey(
+        Comentario, on_delete=models.CASCADE,
+        db_column='comentario_id',
+        related_name='mencoes',
+    )
+    usuario    = models.ForeignKey(
+        Usuario, on_delete=models.CASCADE,
+        db_column='usuario_id',
+        related_name='mencoes_em_comentarios',
+    )
+    criado_em  = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'comentarios_mencoes'
+        managed  = False
+        constraints = [
+            models.UniqueConstraint(
+                fields=['comentario', 'usuario'],
+                name='uq_comentario_mencao',
+            ),
+        ]
+
+    def __str__(self):
+        return f'Menção usuario={self.usuario_id} comentario={self.comentario_id}'
+
+
 # =============================================================================
 # ANEXOS
 # =============================================================================
@@ -810,7 +879,7 @@ class Comentario(models.Model):
 class Anexo(models.Model):
     """
     Tabela: anexos — 'url' é TextField (não FileField).
-    NÃO chamar arquivo.delete(); deleção física via SDK do storage externo.
+    A deleção física é feita pela view quando a URL aponta para MEDIA_URL local.
     """
 
     id           = models.AutoField(primary_key=True)

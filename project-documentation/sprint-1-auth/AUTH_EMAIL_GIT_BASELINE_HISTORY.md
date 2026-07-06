@@ -47,7 +47,7 @@ separate feature pack. They are intentionally not changed during Phase 1.
   leave unstaged and exclude from feature commits.
 - `contexto_completo.txt`: pre-existing deletion; do not inspect, stage, restore,
   or include in commits.
-- `project-documentation/AUTH_AND_EMAIL_STABILIZATION_COMPLETED.md`: completed
+- `project-documentation/auth/AUTH_AND_EMAIL_STABILIZATION_COMPLETED.md`: completed
   stabilization work record
   document to track the approved stabilization work.
 

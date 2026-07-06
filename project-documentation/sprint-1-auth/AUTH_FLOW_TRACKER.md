@@ -64,4 +64,3 @@ An authentication flow can be marked **Complete** only when:
 - Authorization is enforced by the backend, not only hidden in the frontend.
 - The flow has at least one automated integration test or a documented manual
   test performed against the real backend and required external provider.
-- Demo mode remains separate and cannot authorize a production build.

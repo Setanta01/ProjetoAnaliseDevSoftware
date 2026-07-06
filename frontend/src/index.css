@@ -112,6 +112,20 @@
   select {
     font: inherit;
   }
+
+  button,
+  [role="button"] {
+    cursor: pointer;
+  }
+
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+
+  #bit-notification-bar {
+    pointer-events: none !important;
+  }
 }
 
 @layer utilities {

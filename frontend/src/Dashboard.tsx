@@ -10,16 +10,14 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
-import { DemoWorkspace } from '@/demo/DemoWorkspace'
-import { demoProfiles } from '@/demo/data'
+import { Workspace } from '@/Workspace'
 import MfaChallenge from '@/auth/MfaChallenge'
 import { FirstAdminSetupPage, InviteActivationPage } from '@/auth/RegistrationPages'
 import { PasswordRecoveryRequestPage, PasswordResetPage } from '@/auth/PasswordRecoveryPages'
 import type { MfaTipo } from '@/hooks/useMFA'
 import { AUTHENTICATED_HOME, getSessionRestoreDestination } from '@/lib/auth-routing'
 import { getErrorMessage } from '@/lib/errors'
-import { isDemoMode } from '@/lib/env'
-import type { Cargo, UserProfile } from '@/types'
+import type { UserProfile } from '@/types'
 
 const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID ?? ''
 
@@ -48,7 +46,7 @@ function saveTokens(tokens: AuthTokens) {
   localStorage.setItem('refresh_token', tokens.refresh)
 }
 
-function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile: UserProfile) => void; onEnterDemo: () => void }) {
+function AuthPage({ onAuthenticated }: { onAuthenticated: (profile: UserProfile) => void }) {
   const [form, setForm] = useState({ email: '', password: '' })
   const [feedback, setFeedback] = useState<{ message: string; tone: 'success' | 'destructive' } | null>(null)
   const [loading, setLoading] = useState(false)
@@ -130,9 +128,6 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
             <CardTitle className="sr-only">Entrar</CardTitle>
           </CardHeader>
           <CardContent className="space-y-5 p-10 pt-2">
-            {isDemoMode && (
-              <Button type="button" variant="secondary" className="w-full text-primary" onClick={onEnterDemo}>Entrar no modo demonstração</Button>
-            )}
             {feedback && <Alert variant={feedback.tone}>{feedback.message}</Alert>}
             <form
               className="space-y-5"
@@ -149,31 +144,25 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
               </Button>
             </form>
 
-            {!isDemoMode && (
-              <>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">
-                  ou
-                </div>
-                <div className="flex justify-center">
-                  {GOOGLE_CLIENT_ID ? (
-                    <GoogleLogin
-                      onSuccess={(response) => void handleGoogleSuccess(response.credential)}
-                      onError={() => setFeedback({ message: 'Falha ao autenticar com Google.', tone: 'destructive' })}
-                      text="signin_with"
-                      shape="rectangular"
-                      size="large"
-                      width="316"
-                    />
-                  ) : (
-                    <Alert variant="warning" className="text-center text-xs">
-                      Configure VITE_GOOGLE_CLIENT_ID no .env para ativar o login com Google.
-                    </Alert>
-                  )}
-                </div>
-              </>
-            )}
-
-            {isDemoMode && <div className="flex justify-center gap-5 border-t border-border pt-4 text-xs"><a className="text-primary hover:underline" href="/setup-admin">Ver primeiro acesso</a><a className="text-primary hover:underline" href="/activate-invite?token=demo">Ver cadastro por convite</a></div>}
+            <div className="flex items-center gap-2 text-xs text-muted-foreground before:h-px before:flex-1 before:bg-border after:h-px after:flex-1 after:bg-border">
+              ou
+            </div>
+            <div className="flex justify-center">
+              {GOOGLE_CLIENT_ID ? (
+                <GoogleLogin
+                  onSuccess={(response) => void handleGoogleSuccess(response.credential)}
+                  onError={() => setFeedback({ message: 'Falha ao autenticar com Google.', tone: 'destructive' })}
+                  text="signin_with"
+                  shape="rectangular"
+                  size="large"
+                  width="316"
+                />
+              ) : (
+                <Alert variant="warning" className="text-center text-xs">
+                  Configure VITE_GOOGLE_CLIENT_ID no .env para ativar o login com Google.
+                </Alert>
+              )}
+            </div>
           </CardContent>
         </Card>
       </main>
@@ -183,18 +172,16 @@ function AuthPage({ onAuthenticated, onEnterDemo }: { onAuthenticated: (profile:
 
 export default function App() {
   const navigate = useNavigate()
-  const savedDemoRole = localStorage.getItem('lazuli_demo_role') as Cargo | null
-  const [profile, setProfile] = useState<UserProfile | null>(isDemoMode && savedDemoRole && demoProfiles[savedDemoRole] ? demoProfiles[savedDemoRole] : null)
-  const [checkingSession, setCheckingSession] = useState(!isDemoMode && Boolean(localStorage.getItem('access_token')))
+  const [profile, setProfile] = useState<UserProfile | null>(null)
+  const [checkingSession, setCheckingSession] = useState(Boolean(localStorage.getItem('access_token')))
   const bootstrapQuery = useQuery({
     queryKey: ['auth-bootstrap-status'],
     queryFn: () => api.get<BootstrapStatus>('/auth/bootstrap-status/').then((response) => response.data),
-    enabled: !isDemoMode,
     retry: false,
     staleTime: 0,
     refetchOnMount: 'always',
   })
-  const needsInitialAdmin = !isDemoMode && bootstrapQuery.data?.bootstrap_disponivel === true
+  const needsInitialAdmin = bootstrapQuery.data?.bootstrap_disponivel === true
 
   const handleAuthenticated = useCallback((nextProfile: UserProfile) => {
     setProfile(nextProfile)
@@ -202,7 +189,6 @@ export default function App() {
   }, [navigate])
 
   useEffect(() => {
-    if (isDemoMode) return
     if (!localStorage.getItem('access_token')) return
     api.get<UserProfile>('/auth/profile/').then((response) => response.data)
       .then((restoredProfile) => {
@@ -221,24 +207,16 @@ export default function App() {
   const handleLogout = async () => {
     const refresh = localStorage.getItem('refresh_token')
     try {
-      if (!isDemoMode && refresh) await api.post('/auth/logout/', { refresh })
+      if (refresh) await api.post('/auth/logout/', { refresh })
     } finally {
       localStorage.removeItem('access_token')
       localStorage.removeItem('refresh_token')
-      localStorage.removeItem('lazuli_demo_role')
       setProfile(null)
       navigate('/login', { replace: true })
     }
   }
 
-  const enterDemo = () => {
-    const demoProfile = demoProfiles.DEV
-    localStorage.setItem('lazuli_demo_role', demoProfile.cargo)
-    setProfile(demoProfile)
-    navigate(AUTHENTICATED_HOME, { replace: true })
-  }
-
-  if (checkingSession || (!isDemoMode && bootstrapQuery.isLoading)) {
+  if (checkingSession || bootstrapQuery.isLoading) {
     return (
       <main className="auth-background flex min-h-screen items-center justify-center p-4" aria-label="Carregando aplicação" aria-busy="true">
         <Card className="w-full max-w-md shadow-md">
@@ -255,7 +233,7 @@ export default function App() {
     )
   }
 
-  if (!isDemoMode && bootstrapQuery.isError) {
+  if (bootstrapQuery.isError) {
     return (
       <main className="auth-background flex min-h-screen items-center justify-center p-4">
         <Card className="w-full max-w-md">
@@ -271,26 +249,13 @@ export default function App() {
 
   return (
     <Routes>
-      <Route path="/login" element={needsInitialAdmin ? <Navigate to="/setup-admin" replace /> : profile ? <Navigate to={AUTHENTICATED_HOME} replace /> : <AuthPage onAuthenticated={handleAuthenticated} onEnterDemo={enterDemo} />} />
-      <Route path="/setup-admin" element={(isDemoMode || needsInitialAdmin) ? <FirstAdminSetupPage onComplete={async () => { await bootstrapQuery.refetch(); navigate('/login', { replace: true }) }} /> : <Navigate to="/login" replace />} />
+      <Route path="/login" element={needsInitialAdmin ? <Navigate to="/setup-admin" replace /> : profile ? <Navigate to={AUTHENTICATED_HOME} replace /> : <AuthPage onAuthenticated={handleAuthenticated} />} />
+      <Route path="/setup-admin" element={needsInitialAdmin ? <FirstAdminSetupPage onComplete={async () => { await bootstrapQuery.refetch(); navigate('/login', { replace: true }) }} /> : <Navigate to="/login" replace />} />
       <Route path="/activate-invite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
       <Route path="/ativar-convite" element={<InviteActivationPage onComplete={() => navigate('/login', { replace: true })} />} />
       <Route path="/recuperar-senha" element={<PasswordRecoveryRequestPage />} />
       <Route path="/redefinir-senha" element={<PasswordResetPage />} />
-      {isDemoMode ? (
-        <Route
-          path="/app/*"
-          element={profile ? (
-            <DemoWorkspace
-              initialProfile={profile}
-              onProfileChange={(nextProfile) => setProfile(nextProfile)}
-              onExit={() => void handleLogout()}
-            />
-          ) : <Navigate to="/login" replace />}
-        />
-      ) : (
-        <Route path="/app/*" element={profile ? <DemoWorkspace initialProfile={profile} onProfileChange={(nextProfile) => setProfile(nextProfile)} onExit={() => void handleLogout()} demoMode={false} /> : <Navigate to="/login" replace />} />
-      )}
+      <Route path="/app/*" element={profile ? <Workspace initialProfile={profile} onProfileChange={(nextProfile) => setProfile(nextProfile)} onExit={() => void handleLogout()} /> : <Navigate to="/login" replace />} />
       <Route path="*" element={<Navigate to={needsInitialAdmin ? '/setup-admin' : profile ? AUTHENTICATED_HOME : '/login'} replace />} />
     </Routes>
   )

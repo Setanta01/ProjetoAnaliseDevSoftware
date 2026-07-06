@@ -6,7 +6,7 @@ const priorityVariant: Record<Prioridade, BadgeProps['variant']> = {
   BAIXA: 'info',
   MEDIA: 'warning',
   ALTA: 'urgent',
-  CRITICA: 'danger',
+  URGENTE: 'danger',
 }
 
 const statusVariant: Record<TaskStatus, BadgeProps['variant']> = {

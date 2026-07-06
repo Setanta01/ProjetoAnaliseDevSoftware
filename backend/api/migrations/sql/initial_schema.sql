@@ -233,12 +233,14 @@ CREATE TABLE permissoes_coluna (
 
 CREATE TABLE cards (
     id                      SERIAL PRIMARY KEY,
+    codigo                  VARCHAR(4)      NOT NULL UNIQUE,
     projeto_id              INT             NOT NULL,
     sprint_id               INT,                       -- NULL = backlog
     coluna_id               INT             NOT NULL,
     tipo                    card_tipo       NOT NULL DEFAULT 'TAREFA',
     titulo                  VARCHAR(200)    NOT NULL,
     descricao               TEXT,
+    criterios_aceitacao     TEXT,
     prioridade              card_prioridade NOT NULL DEFAULT 'MEDIA',
     posicao                 INT             NOT NULL DEFAULT 0,
     criado_por              INT             NOT NULL,
@@ -340,8 +342,8 @@ CREATE TABLE justificativas_prazo (
     id                SERIAL PRIMARY KEY,
     card_id           INT         NOT NULL,
     usuario_id        INT         NOT NULL,
-    due_date_anterior DATE        NOT NULL,
-    due_date_nova     DATE        NOT NULL,
+    due_date_anterior DATE,
+    due_date_nova     DATE,
     justificativa     TEXT        NOT NULL,
     criado_em         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
@@ -394,7 +396,7 @@ CREATE TABLE estimativas (
     id            SERIAL PRIMARY KEY,
     card_id       INT         NOT NULL,
     usuario_id    INT         NOT NULL,
-    valor         INT         NOT NULL,
+    valor         VARCHAR(8)  NOT NULL,
     revelada      BOOLEAN     NOT NULL DEFAULT FALSE,
     criado_em     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     atualizado_em TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -442,6 +444,20 @@ CREATE TABLE comentarios (
 );
 
 CREATE INDEX idx_comentarios_card ON comentarios(card_id);
+
+CREATE TABLE comentarios_mencoes (
+    id            SERIAL PRIMARY KEY,
+    comentario_id INT NOT NULL,
+    usuario_id    INT NOT NULL,
+    criado_em     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    CONSTRAINT fk_comentario_mencao_comentario FOREIGN KEY (comentario_id) REFERENCES comentarios(id) ON DELETE CASCADE,
+    CONSTRAINT fk_comentario_mencao_usuario    FOREIGN KEY (usuario_id)    REFERENCES usuarios(id) ON DELETE CASCADE,
+    CONSTRAINT uq_comentario_mencao UNIQUE (comentario_id, usuario_id)
+);
+
+CREATE INDEX idx_comentarios_mencoes_comentario ON comentarios_mencoes(comentario_id);
+CREATE INDEX idx_comentarios_mencoes_usuario ON comentarios_mencoes(usuario_id);
 
 -- =============================================================
 -- ANEXOS (imagens e evidências de bug)

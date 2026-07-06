@@ -72,6 +72,8 @@ lerna-debug.log*
 .env.*
 !.env.example
 project-documentation/LOCAL_SECRETS.md
+project-documentation/auth/LOCAL_SECRETS.md
+project-documentation/sprint-1-auth/LOCAL_SECRETS.md
 
 # ─────────────────────────────────────────
 #  EDITORES / IDEs

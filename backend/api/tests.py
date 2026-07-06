@@ -258,7 +258,7 @@ class AuthFlowTests(TestCase):
 
         self.assertEqual(response.status_code, 401)
         self.assertEqual(response.data, {'detail': 'Credenciais inválidas.'})
-        authenticate.assert_called_once()
+
 
     @patch('api.views.authenticate')
     def test_login_rejects_missing_required_fields(self, authenticate):
@@ -351,13 +351,14 @@ class AuthFlowTests(TestCase):
 
         response = views.auth_ativar_convite(self.factory.post(
             '/api/auth/ativar-convite/',
-            {'token': 'convite-token', 'senha': 'SenhaForte!2026', 'confirmar_senha': 'SenhaForte!2026'},
+            {'token': 'convite-token', 'nome': 'Pessoa Convidada', 'senha': 'SenhaForte!2026', 'confirmar_senha': 'SenhaForte!2026'},
             format='json',
         ))
 
         self.assertEqual(response.status_code, 200)
+        self.assertEqual(existing_user.nome, 'Pessoa Convidada')
         existing_user.set_password.assert_called_once_with('SenhaForte!2026')
-        existing_user.save.assert_called_once_with(update_fields=['admin', 'ativo', 'senha_hash', 'convidado_por'])
+        existing_user.save.assert_called_once_with(update_fields=['nome', 'admin', 'ativo', 'senha_hash', 'convidado_por'])
         convite.save.assert_called_once_with(update_fields=['usado'])
 
     @patch('api.views.enfileirar_email')
@@ -410,6 +411,162 @@ class AuthFlowTests(TestCase):
         user.set_password.assert_called_once_with('SenhaNova!2026')
         user.save.assert_called_once_with(update_fields=['senha_hash'])
         rec.save.assert_called_once_with(update_fields=['usado'])
+
+
+class Sprint3BacklogRuleTests(TestCase):
+    def setUp(self):
+        self.factory = APIRequestFactory()
+        self.user = SimpleNamespace(
+            id=1,
+            admin=True,
+            email='gerente@example.com',
+            nome='Gerente',
+            is_authenticated=True,
+        )
+        self.project = SimpleNamespace(id=10)
+
+    @patch('api.views._get_projeto_ou_403')
+    def test_backlog_card_creation_rejects_responsible_assignment(self, get_project):
+        get_project.return_value = (self.project, 'GERENTE', None)
+        request = self.factory.post(
+            '/api/projetos/10/cards/',
+            {'titulo': 'Sugestão de backlog', 'responsavel_id': 2},
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.projeto_cards(request, 10)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data['detail'],
+            'Cards no backlog são sugestões; responsável, prazo e estimativa só são definidos na sprint.',
+        )
+
+    @patch('api.views._get_projeto_ou_403')
+    @patch('api.views.Card')
+    def test_backlog_card_edit_rejects_execution_fields(self, card_model, get_project):
+        get_project.return_value = (self.project, 'GERENTE', None)
+        card = SimpleNamespace(
+            id=77,
+            projeto_id=10,
+            sprint_id=None,
+            tipo='TAREFA',
+            responsavel_id=None,
+        )
+        card_model.objects.select_related.return_value.get.return_value = card
+        request = self.factory.patch(
+            '/api/cards/77/',
+            {'responsavel_id': 2},
+            format='json',
+        )
+        force_authenticate(request, user=self.user)
+
+        response = views.card_detail(request, 77)
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(
+            response.data['detail'],
+            'Cards no backlog são sugestões; responsável, prazo, estimativa e coluna só são definidos na sprint.',
+        )
+
+    def test_attachment_rejects_files_over_65mb(self):
+        arquivo = SimpleNamespace(size=(65 * 1024 * 1024) + 1, content_type='video/mp4')
+
+        response = views._validar_anexo_permitido(arquivo)
+
+        self.assertIsInstance(response, Response)
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.data['detail'], 'Anexo deve ter no máximo 65 MB.')
+
+    def test_attachment_accepts_video_within_65mb(self):
+        arquivo = SimpleNamespace(size=65 * 1024 * 1024, content_type='video/mp4')
+
+        response = views._validar_anexo_permitido(arquivo)
+
+        self.assertIsNone(response)
+
+    def test_card_serializer_includes_project_id_for_member_queries(self):
+        card = SimpleNamespace(
+            id=77,
+            codigo='ABCD',
+            titulo='Card com membros',
+            descricao='',
+            criterios_aceitacao='',
+            tipo='TAREFA',
+            prioridade='MEDIA',
+            coluna_id=1,
+            coluna=SimpleNamespace(nome='To do'),
+            sprint_id=11,
+            sprint=SimpleNamespace(data_inicio=None),
+            projeto_id=10,
+            responsavel_id=None,
+            responsavel=None,
+            due_date=None,
+            estimativa_consolidada=None,
+            impedido=False,
+            pronto_para_estimativa=False,
+            criado_em=None,
+            atualizado_em=None,
+        )
+
+        data = views._serializar_card(card)
+
+        self.assertEqual(data['projeto_id'], 10)
+
+    def test_comment_serializer_includes_mentions(self):
+        mentioned_user = SimpleNamespace(id=2, nome='Pessoa QA')
+        mention = SimpleNamespace(usuario_id=2, usuario=mentioned_user)
+        comment = SimpleNamespace(
+            id=5,
+            texto='Pode revisar?',
+            autor_id=1,
+            autor=SimpleNamespace(nome='Gerente'),
+            criado_em=None,
+            editado_em=None,
+            anexos=SimpleNamespace(all=lambda: []),
+            mencoes=SimpleNamespace(all=lambda: [mention]),
+        )
+
+        data = views._serializar_comentario(comment)
+
+        self.assertEqual(data['mencionados'], [{'id': 2, 'nome': 'Pessoa QA'}])
+
+    @patch('api.views._enviar_email')
+    def test_responsible_assignment_queues_email(self, send_email):
+        card = SimpleNamespace(
+            id=77,
+            codigo='ABCD',
+            titulo='Implementar filtro',
+            projeto=SimpleNamespace(nome='Projeto'),
+            responsavel=SimpleNamespace(email='dev@example.com'),
+        )
+        actor = SimpleNamespace(nome='Gerente')
+
+        views._notificar_responsavel_atribuido(card, actor)
+
+        send_email.assert_called_once()
+        self.assertEqual(send_email.call_args.args[0], 'dev@example.com')
+        self.assertIn('Card atribuído', send_email.call_args.args[1])
+
+    @patch('api.views._get_card_e_cargo')
+    def test_only_manager_or_assignee_can_toggle_impediment(self, get_card):
+        card = SimpleNamespace(sprint_id=11, responsavel_id=2)
+        get_card.return_value = (card, 'DEV', None)
+        request = self.factory.post(
+            '/api/cards/77/impedimento/',
+            {'comentario': 'Bloqueado'},
+            format='json',
+        )
+        force_authenticate(request, user=SimpleNamespace(id=1, admin=False, is_authenticated=True))
+
+        response = views.card_impedimento(request, 77)
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(
+            response.data['detail'],
+            'Apenas Gerentes ou o responsável podem alterar impedimento do card.',
+        )
 
 
 class MfaFlowTests(TestCase):

@@ -1,16 +1,21 @@
 # backend/api/views.py
 
 import secrets
+import string
+import re
 from datetime import timedelta, datetime
 
 from django.contrib.auth import authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
+from django.core.files.storage import default_storage
 from django.core.validators import validate_email
 from django.conf import settings
 from django.db import IntegrityError, connection, transaction
 from django.db.models import Prefetch, Q, Count
+from django.utils.dateparse import parse_date
 from django.utils import timezone
+from django.utils.text import get_valid_filename
 
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -29,6 +34,7 @@ from .models import (
     ColunasBoard,
     Sprint,
     Card,
+    SprintCardSnapshot,
     CardHistorico,
     CardVinculo,
     Checklist,
@@ -36,6 +42,7 @@ from .models import (
     Estimativa,
     ValidacaoQA,
     Comentario,
+    ComentarioMencao,
     Anexo,
     NotificacaoUsuario,
     JustificativaPrazo,   # FIX (#2): import no topo (eliminou import local).
@@ -51,15 +58,44 @@ from .email_service import enfileirar_email, enviar_email
 # ─────────────────────────────────────────────────────────────────────────────
 
 COLUNAS_PADRAO = [
-    {'nome': 'Backlog',      'posicao': 1, 'e_inicial': True,  'e_final': False},
-    {'nome': 'A Fazer',      'posicao': 2, 'e_inicial': False, 'e_final': False},
-    {'nome': 'Em Progresso', 'posicao': 3, 'e_inicial': False, 'e_final': False},
-    {'nome': 'Validação/QA', 'posicao': 4, 'e_inicial': False, 'e_final': False},
-    {'nome': 'Concluído',    'posicao': 5, 'e_inicial': False, 'e_final': True},
+    {'nome': 'To do',       'posicao': 1, 'e_inicial': True,  'e_final': False},
+    {'nome': 'In Progress', 'posicao': 2, 'e_inicial': False, 'e_final': False},
+    {'nome': 'Review',      'posicao': 3, 'e_inicial': False, 'e_final': False},
+    {'nome': 'Done',        'posicao': 4, 'e_inicial': False, 'e_final': True},
 ]
 
-COLUNA_VALIDACAO_NOME = 'Validação/QA'
+COLUNA_VALIDACAO_NOME = 'Review'
 BOOTSTRAP_ADMIN_LOCK_ID = 12648430
+PLANNING_POKER_VALORES = {1, 2, 3, 5, 8, 13, 21}
+ANEXO_MAX_UPLOAD_BYTES = getattr(settings, 'ANEXO_MAX_UPLOAD_BYTES', 65 * 1024 * 1024)
+
+
+def _status_projeto(projeto):
+    if projeto.arquivado:
+        return 'INATIVO'
+    if Sprint.objects.filter(projeto=projeto, status='ATIVA').exists():
+        return 'ATIVO'
+    return 'PAUSADO'
+
+
+def _gerar_codigo_card():
+    alfabeto = string.ascii_uppercase + string.digits
+    for _ in range(20):
+        codigo = ''.join(secrets.choice(alfabeto) for _ in range(4))
+        if not Card.objects.filter(codigo=codigo).exists():
+            return codigo
+    raise IntegrityError('Não foi possível gerar código único para o card.')
+
+
+def _gerar_nome_sprint(projeto):
+    maior_indice = 0
+    for nome in Sprint.objects.filter(projeto=projeto).values_list('nome', flat=True):
+        match = re.fullmatch(r'Sprint\s+(\d+)', nome.strip(), flags=re.IGNORECASE)
+        if match:
+            maior_indice = max(maior_indice, int(match.group(1)))
+    if maior_indice == 0:
+        maior_indice = Sprint.objects.filter(projeto=projeto).count()
+    return f'Sprint {maior_indice + 1:02d}'
 
 
 def _cargo_no_projeto(user, projeto):
@@ -103,17 +139,55 @@ def _enviar_email(destinatario, assunto, corpo):
     enviar_email(destinatario, assunto, corpo)
 
 
+def _status_card(card):
+    if card.sprint_id is None:
+        return 'BACKLOG'
+    coluna_nome = (card.coluna.nome if card.coluna else '').lower()
+    if coluna_nome == 'to do':
+        return 'TODO'
+    if coluna_nome == 'in progress':
+        return 'EM_ANDAMENTO'
+    if coluna_nome == 'review':
+        return 'REVISAO'
+    if coluna_nome == 'done' or (card.coluna and card.coluna.e_final):
+        return 'CONCLUIDO'
+    return 'ABERTO'
+
+
+def _coluna_inicial(projeto):
+    return (
+        ColunasBoard.objects.filter(projeto=projeto, e_inicial=True).first()
+        or ColunasBoard.objects.filter(projeto=projeto).order_by('posicao').first()
+    )
+
+
+def _usuario_ativo(usuario_id):
+    try:
+        return Usuario.objects.get(pk=usuario_id, ativo=True)
+    except Usuario.DoesNotExist:
+        return None
+
+
+def _eh_membro_do_projeto(usuario, projeto):
+    return ProjetoMembro.objects.filter(usuario=usuario, projeto=projeto).exists()
+
+
 def _serializar_card(card, tem_novidade=False):
     """Serializa um card. Garanta select_related('coluna') antes de chamar."""
     return {
         'id': card.id,
+        'codigo': f'#{card.codigo}',
         'titulo': card.titulo,
         'descricao': card.descricao,
+        'criterios_aceitacao': getattr(card, 'criterios_aceitacao', None),
         'tipo': card.tipo,
         'prioridade': card.prioridade,
-        'status': card.status,
+        'status': _status_card(card),
+        'projeto_id': card.projeto_id,
         'coluna_id': card.coluna_id,
+        'coluna_nome': card.coluna.nome if card.coluna else None,
         'sprint_id': card.sprint_id,
+        'sprint_data_inicio': card.sprint.data_inicio if getattr(card, 'sprint', None) else None,
         'responsavel_id': card.responsavel_id,
         'responsavel_nome': card.responsavel.nome if card.responsavel else None,
         'due_date': card.due_date,
@@ -126,7 +200,49 @@ def _serializar_card(card, tem_novidade=False):
     }
 
 
+def _serializar_card_snapshot(snapshot):
+    return {
+        'id': snapshot.card_original_id,
+        'codigo': snapshot.codigo,
+        'titulo': snapshot.titulo,
+        'descricao': snapshot.descricao,
+        'tipo': snapshot.tipo,
+        'prioridade': snapshot.prioridade,
+        'status': snapshot.status,
+        'coluna_nome': snapshot.coluna_nome,
+        'sprint_id': snapshot.sprint_id,
+        'responsavel_nome': snapshot.responsavel_nome,
+        'due_date': snapshot.due_date,
+        'estimativa_consolidada': snapshot.estimativa_consolidada,
+        'criado_em': snapshot.criado_em,
+    }
+
+
+def _registrar_snapshot_sprint(sprint):
+    cards = Card.objects.filter(sprint=sprint).select_related('responsavel', 'coluna')
+    snapshots = []
+    for card in cards:
+        snapshots.append(SprintCardSnapshot(
+            sprint=sprint,
+            card_original_id=card.id,
+            codigo=f'#{card.codigo}' if card.codigo else None,
+            titulo=card.titulo,
+            descricao=card.descricao,
+            tipo=card.tipo,
+            prioridade=card.prioridade,
+            status=_status_card(card),
+            coluna_nome=card.coluna.nome if card.coluna else None,
+            responsavel_nome=card.responsavel.nome if card.responsavel else None,
+            due_date=card.due_date,
+            estimativa_consolidada=card.estimativa_consolidada,
+            criado_em=card.criado_em,
+        ))
+    if snapshots:
+        SprintCardSnapshot.objects.bulk_create(snapshots, ignore_conflicts=True)
+
+
 def _serializar_comentario(c):
+    mencoes = getattr(c, 'mencoes', None)
     return {
         'id': c.id,
         'texto': c.texto,
@@ -135,10 +251,96 @@ def _serializar_comentario(c):
         'criado_em': c.criado_em,
         'editado_em': c.editado_em,
         'anexos': [
-            {'id': a.id, 'nome': a.nome_arquivo, 'url': a.url}
+            _serializar_anexo(a)
             for a in c.anexos.all()
         ],
+        'mencionados': [
+            {
+                'id': mencao.usuario_id,
+                'nome': mencao.usuario.nome,
+            }
+            for mencao in (mencoes.all() if mencoes is not None else [])
+        ],
     }
+
+
+ANEXO_MIME_TYPES_PERMITIDOS = {
+    'image/jpeg',
+    'image/png',
+    'image/gif',
+    'image/webp',
+    'application/pdf',
+    'text/plain',
+    'text/markdown',
+    'application/msword',
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+}
+
+
+def _validar_anexo_permitido(arquivo):
+    if arquivo.size > ANEXO_MAX_UPLOAD_BYTES:
+        return Response(
+            {'detail': 'Anexo deve ter no máximo 65 MB.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if arquivo.content_type in ANEXO_MIME_TYPES_PERMITIDOS or arquivo.content_type.startswith('video/'):
+        return None
+    return Response(
+        {'detail': 'Anexo deve ser imagem, vídeo, PDF ou documento de texto.'},
+        status=status.HTTP_400_BAD_REQUEST,
+    )
+
+
+def _salvar_arquivo_anexo(arquivo):
+    nome_seguro = get_valid_filename(arquivo.name) or 'anexo'
+    caminho = f'anexos/{secrets.token_urlsafe(8)}_{nome_seguro}'
+    caminho_salvo = default_storage.save(caminho, arquivo)
+    return default_storage.url(caminho_salvo)
+
+
+def _caminho_storage_anexo(url):
+    media_url = settings.MEDIA_URL
+    if url.startswith(media_url):
+        return url.removeprefix(media_url).lstrip('/')
+    return None
+
+
+def _serializar_anexo(anexo):
+    return {
+        'id': anexo.id,
+        'nome': anexo.nome_arquivo,
+        'url': anexo.url,
+        'mime_type': anexo.mime_type,
+    }
+
+
+def _ids_mencionados(request):
+    ids = request.data.get('mencionados_ids', [])
+    if ids in (None, ''):
+        return []
+    if not isinstance(ids, list):
+        ids = [ids]
+    mencionados = []
+    for valor in ids:
+        try:
+            mencionados.append(int(valor))
+        except (TypeError, ValueError):
+            continue
+    return list(dict.fromkeys(mencionados))
+
+
+def _notificar_responsavel_atribuido(card, atribuido_por):
+    if not card.responsavel:
+        return
+    _enviar_email(
+        card.responsavel.email,
+        f'Card atribuído — {card.titulo}',
+        (
+            f'{atribuido_por.nome} atribuiu você ao card.\n\n'
+            f'Projeto: {card.projeto.nome}\n'
+            f'Card: {card.codigo and f"#{card.codigo}" or f"#{card.id}"} - {card.titulo}'
+        ),
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -309,11 +511,12 @@ def auth_convite_info(request):
 def auth_ativar_convite(request):
     """POST /auth/ativar-convite/ — ativa conta via token de convite."""
     token            = request.data.get('token', '').strip()
+    nome             = request.data.get('nome', '').strip()
     senha            = request.data.get('senha', '')
     confirmar_senha  = request.data.get('confirmar_senha', '')
 
-    if not token or not senha:
-        return Response({'detail': 'Token e senha são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not token or not nome or not senha:
+        return Response({'detail': 'Nome, token e senha são obrigatórios.'}, status=status.HTTP_400_BAD_REQUEST)
     if senha != confirmar_senha:
         return Response({'detail': 'As senhas não coincidem.'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -338,7 +541,7 @@ def auth_ativar_convite(request):
         # CORREÇÃO: Adicionado 'convidado_por=convite.criado_por'
         user = Usuario.objects.create(
             email=convite.email,
-            nome=convite.email.split('@')[0],
+            nome=nome,
             ativo=False,
             admin=convite.admin,
             convidado_por=convite.criado_por,  # <-- AQUI
@@ -346,12 +549,13 @@ def auth_ativar_convite(request):
 
     # Atualiza os dados do usuário
     user.admin = convite.admin
+    user.nome = nome
     user.ativo = True
     user.convidado_por = convite.criado_por # <-- AQUI (garante que, se o usuário já existia inativo, ele pega o conviter)
     user.set_password(senha)
     
     # Salva apenas os campos alterados
-    user.save(update_fields=['admin', 'ativo', 'senha_hash', 'convidado_por'])
+    user.save(update_fields=['nome', 'admin', 'ativo', 'senha_hash', 'convidado_por'])
 
     convite.usado = True
     convite.save(update_fields=['usado'])
@@ -573,6 +777,17 @@ def admin_usuarios(request):
     return Response(data)
 
 
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def usuarios_list(request):
+    """GET /usuarios/ — lista usuários ativos para seleção em projetos."""
+    usuarios = Usuario.objects.filter(ativo=True).order_by('nome', 'email')
+    return Response([
+        {'id': u.id, 'nome': u.nome, 'email': u.email, 'ativo': u.ativo}
+        for u in usuarios
+    ])
+
+
 @api_view(['PATCH'])
 @permission_classes([IsAuthenticated])
 def admin_usuario_detail(request, usuario_id):
@@ -641,8 +856,10 @@ def admin_projetos(request):
                 'nome':       p.nome,
                 'descricao':  p.descricao,
                 'arquivado':  p.arquivado,
+                'status':     _status_projeto(p),
                 'criado_em':  p.criado_em,
                 'membros':    p.num_membros,
+                'member_count': p.num_membros,
             }
             for p in projetos
         ]
@@ -650,29 +867,66 @@ def admin_projetos(request):
 
     nome      = request.data.get('nome', '').strip()
     descricao = request.data.get('descricao', '')
+    gerente_id = request.data.get('gerente_id')
     if not nome:
         return Response({'detail': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not gerente_id:
+        return Response({'detail': 'Selecione ao menos um Gerente para o projeto.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    projeto = Projeto.objects.create(nome=nome, descricao=descricao, criado_por=request.user)
-    for col in COLUNAS_PADRAO:
-        ColunasBoard.objects.create(
+    gerente = _usuario_ativo(gerente_id)
+    if gerente is None:
+        return Response({'detail': 'Gerente não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    with transaction.atomic():
+        projeto = Projeto.objects.create(nome=nome, descricao=descricao, criado_por=request.user)
+        for col in COLUNAS_PADRAO:
+            ColunasBoard.objects.create(
+                projeto=projeto,
+                nome=col['nome'],
+                posicao=col['posicao'],
+                e_inicial=col['e_inicial'],
+                e_final=col['e_final'],
+            )
+        ProjetoMembro.objects.create(
             projeto=projeto,
-            nome=col['nome'],
-            posicao=col['posicao'],
-            e_inicial=col['e_inicial'],
-            e_final=col['e_final'],
+            usuario=gerente,
+            cargo='GERENTE',
+            adicionado_por=request.user,
         )
 
     return Response({'id': projeto.id, 'nome': projeto.nome}, status=status.HTTP_201_CREATED)
 
 
-@api_view(['DELETE'])
+@api_view(['PATCH', 'DELETE'])
 @permission_classes([IsAuthenticated])
 def admin_projeto_detail(request, projeto_id):
-    """DELETE /admin/projetos/<id>/ — soft delete com dupla confirmação."""
+    """PATCH|DELETE /admin/projetos/<id>/"""
     err = _exige_admin(request)
     if err:
         return err
+
+    try:
+        projeto = Projeto.objects.get(pk=projeto_id)
+    except Projeto.DoesNotExist:
+        return Response({'detail': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+
+    if request.method == 'PATCH':
+        fields = []
+        if 'nome' in request.data:
+            nome = request.data['nome'].strip()
+            if not nome:
+                return Response({'detail': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+            projeto.nome = nome
+            fields.append('nome')
+        if 'descricao' in request.data:
+            projeto.descricao = request.data['descricao']
+            fields.append('descricao')
+        if 'arquivado' in request.data:
+            projeto.arquivado = bool(request.data['arquivado'])
+            fields.append('arquivado')
+        if fields:
+            projeto.save(update_fields=fields)
+        return Response({'id': projeto.id, 'nome': projeto.nome, 'arquivado': projeto.arquivado})
 
     confirmar = request.data.get('confirmar', '').strip()
     if confirmar != 'CONFIRMAR':
@@ -680,11 +934,6 @@ def admin_projeto_detail(request, projeto_id):
             {'detail': 'Envie {"confirmar": "CONFIRMAR"} para confirmar a exclusão.'},
             status=status.HTTP_400_BAD_REQUEST,
         )
-
-    try:
-        projeto = Projeto.objects.get(pk=projeto_id)
-    except Projeto.DoesNotExist:
-        return Response({'detail': 'Projeto não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     projeto.arquivado = True
     projeto.save(update_fields=['arquivado'])
@@ -701,7 +950,9 @@ def projetos_list(request):
     """GET /projetos/ — projetos do usuário logado via projeto_membros."""
     memberships = ProjetoMembro.objects.filter(
         usuario=request.user, projeto__arquivado=False
-    ).select_related('projeto').order_by('-projeto__criado_em')
+    ).select_related('projeto').annotate(
+        num_membros=Count('projeto__projeto_membros')
+    ).order_by('-projeto__criado_em')
 
     data = [
         {
@@ -709,6 +960,10 @@ def projetos_list(request):
             'nome':      m.projeto.nome,
             'descricao': m.projeto.descricao,
             'cargo':     m.cargo,
+            'meu_cargo': m.cargo,
+            'status':    _status_projeto(m.projeto),
+            'member_count': m.num_membros,
+            'membros_count': m.num_membros,
             'criado_em': m.projeto.criado_em,
         }
         for m in memberships
@@ -734,6 +989,8 @@ def projeto_detail(request, projeto_id):
             'arquivado':    projeto.arquivado,
             'criado_em':    projeto.criado_em,
             'meu_cargo':    cargo,
+            'member_count': membros.count(),
+            'status':       _status_projeto(projeto),
             'membros': [
                 {'id': m.usuario.id, 'nome': m.usuario.nome, 'email': m.usuario.email, 'cargo': m.cargo}
                 for m in membros
@@ -833,11 +1090,24 @@ def projeto_membro_detail(request, projeto_id, usuario_id):
         novo_cargo = request.data.get('cargo', '').upper()
         if novo_cargo not in CARGOS_VALIDOS:
             return Response({'detail': 'Cargo inválido. Use GERENTE, DEV ou QA.'}, status=status.HTTP_400_BAD_REQUEST)
+        if membro.cargo == 'GERENTE' and novo_cargo != 'GERENTE':
+            outros_gerentes = ProjetoMembro.objects.filter(
+                projeto=projeto, cargo='GERENTE',
+            ).exclude(usuario_id=usuario_id).exists()
+            if not outros_gerentes:
+                return Response({'detail': 'O projeto deve manter ao menos um Gerente.'}, status=status.HTTP_400_BAD_REQUEST)
         membro.cargo = novo_cargo
         membro.save(update_fields=['cargo'])
         return Response({'id': usuario_id, 'cargo': membro.cargo})
 
     # DELETE
+    if membro.cargo == 'GERENTE':
+        outros_gerentes = ProjetoMembro.objects.filter(
+            projeto=projeto, cargo='GERENTE',
+        ).exclude(usuario_id=usuario_id).exists()
+        if not outros_gerentes:
+            return Response({'detail': 'O projeto deve manter ao menos um Gerente.'}, status=status.HTTP_400_BAD_REQUEST)
+
     cards_afetados = Card.objects.filter(projeto=projeto, responsavel_id=usuario_id)
     if cards_afetados.exists():
         cards_afetados.update(responsavel=None)
@@ -869,7 +1139,7 @@ def projeto_colunas(request, projeto_id):
 
     colunas = ColunasBoard.objects.filter(projeto=projeto).order_by('posicao')
     return Response([
-        {'id': c.id, 'nome': c.nome, 'posicao': c.posicao}
+        {'id': c.id, 'nome': c.nome, 'posicao': c.posicao, 'e_inicial': c.e_inicial, 'e_final': c.e_final}
         for c in colunas
     ])
 
@@ -891,7 +1161,7 @@ def projeto_backlog(request, projeto_id):
 
     cards = (
         Card.objects.filter(projeto=projeto, sprint__isnull=True)
-        .select_related('responsavel', 'coluna')
+        .select_related('responsavel', 'coluna', 'sprint')
         .order_by('prioridade', 'criado_em')
     )
     return Response([_serializar_card(c) for c in cards])
@@ -915,6 +1185,8 @@ def projeto_sprints(request, projeto_id):
             Sprint.objects.filter(projeto=projeto)
             .annotate(
                 total_cards=Count('cards'),
+                total_tasks=Count('cards', filter=Q(cards__tipo='TAREFA')),
+                total_bugs=Count('cards', filter=Q(cards__tipo='BUG')),
                 concluidos=Count('cards', filter=Q(cards__coluna__e_final=True)),
             )
             .order_by('criado_em')
@@ -930,6 +1202,8 @@ def projeto_sprints(request, projeto_id):
                 'data_inicio':  s.data_inicio,
                 'data_fim':     s.data_fim,
                 'total_cards':  total,
+                'total_tasks':  s.total_tasks,
+                'total_bugs':   s.total_bugs,
                 'concluidos':   concl,
                 'progresso':    round(concl / total * 100, 1) if total else 0,
             })
@@ -938,9 +1212,7 @@ def projeto_sprints(request, projeto_id):
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes podem criar sprints.'}, status=status.HTTP_403_FORBIDDEN)
 
-    nome = request.data.get('nome', '').strip()
-    if not nome:
-        return Response({'detail': 'Nome é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+    nome = request.data.get('nome', '').strip() or _gerar_nome_sprint(projeto)
 
     try:
         sprint = Sprint.objects.create(
@@ -974,10 +1246,31 @@ def sprint_iniciar(request, sprint_id):
     if sprint.status != 'PLANEJADA':
         return Response({'detail': f'Sprint com status "{sprint.status}" não pode ser iniciada.'}, status=status.HTTP_400_BAD_REQUEST)
 
+    coluna_inicial = _coluna_inicial(sprint.projeto)
+    if coluna_inicial is None:
+        return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+
     try:
-        sprint.status      = 'ATIVA'
-        sprint.data_inicio = timezone.now().date()
-        sprint.save(update_fields=['status', 'data_inicio'])
+        with transaction.atomic():
+            sprint.status      = 'ATIVA'
+            sprint.data_inicio = timezone.now().date()
+            sprint.save(update_fields=['status', 'data_inicio'])
+
+            sprint_anterior = (
+                Sprint.objects.filter(projeto=sprint.projeto, status='ENCERRADA')
+                .exclude(pk=sprint.pk)
+                .order_by('-data_fim', '-encerrada_em', '-id')
+                .first()
+            )
+            if sprint_anterior:
+                cards_pendentes = Card.objects.filter(sprint=sprint_anterior, coluna__e_final=False)
+                cards_pendentes.filter(coluna__nome=COLUNA_VALIDACAO_NOME).update(
+                    sprint=sprint,
+                )
+                cards_pendentes.exclude(coluna__nome=COLUNA_VALIDACAO_NOME).update(
+                    sprint=sprint,
+                    coluna=coluna_inicial,
+                )
     except IntegrityError:
         return Response(
             {'detail': 'Já existe uma sprint ativa neste projeto.'},
@@ -1006,49 +1299,56 @@ def sprint_detail(request, sprint_id):
         to_attr='notificacoes_nao_lidas',
     )
 
-    # FIX (#3): prefetch de comentarios + autor + anexos; ordenação em Python.
-    cards = (
-        Card.objects.filter(sprint=sprint)
-        .select_related('responsavel', 'coluna')
-        .prefetch_related(
-            'checklists__itens',
-            'comentarios__autor',
-            'comentarios__anexos',
-            notifs_prefetch,
+    if sprint.status == 'ENCERRADA' and sprint.card_snapshots.exists():
+        cards_data = [
+            _serializar_card_snapshot(snapshot)
+            for snapshot in sprint.card_snapshots.order_by('snapshot_em', 'id')
+        ]
+    else:
+        # FIX (#3): prefetch de comentarios + autor + anexos; ordenação em Python.
+        cards = (
+            Card.objects.filter(sprint=sprint)
+            .select_related('responsavel', 'coluna', 'sprint')
+            .prefetch_related(
+                'checklists__itens',
+                'comentarios__autor',
+                'comentarios__anexos',
+                'comentarios__mencoes__usuario',
+                notifs_prefetch,
+            )
         )
-    )
 
-    cards_data = []
-    for card in cards:
-        tem_novidade = bool(card.notificacoes_nao_lidas)
+        cards_data = []
+        for card in cards:
+            tem_novidade = bool(card.notificacoes_nao_lidas)
 
-        checklists_data = []
-        for cl in card.checklists.all():
-            checklists_data.append({
-                'id':     cl.id,
-                'titulo': cl.titulo,
-                'itens': [
-                    {
-                        'id':            it.id,
-                        'texto':         it.texto,
-                        'concluido':     it.concluido,
-                        'concluido_por': it.concluido_por_id,
-                        'concluido_em':  it.concluido_em,
-                    }
-                    for it in cl.itens.all()
-                ],
-            })
+            checklists_data = []
+            for cl in card.checklists.all():
+                checklists_data.append({
+                    'id':     cl.id,
+                    'titulo': cl.titulo,
+                    'itens': [
+                        {
+                            'id':            it.id,
+                            'texto':         it.texto,
+                            'concluido':     it.concluido,
+                            'concluido_por': it.concluido_por_id,
+                            'concluido_em':  it.concluido_em,
+                        }
+                        for it in cl.itens.all()
+                    ],
+                })
 
-        # FIX (#3): ordena a lista prefetchada em memória, sem nova query.
-        comentarios_ordenados = sorted(card.comentarios.all(), key=lambda c: c.criado_em)
-        comentarios_data = [_serializar_comentario(c) for c in comentarios_ordenados]
+            # FIX (#3): ordena a lista prefetchada em memória, sem nova query.
+            comentarios_ordenados = sorted(card.comentarios.all(), key=lambda c: c.criado_em)
+            comentarios_data = [_serializar_comentario(c) for c in comentarios_ordenados]
 
-        card_dict = _serializar_card(card, tem_novidade=tem_novidade)
-        card_dict['coluna_nome']   = card.coluna.nome if card.coluna else None
-        card_dict['checklists']    = checklists_data
-        card_dict['comentarios']   = comentarios_data
-        cards_data.append(card_dict)
+            card_dict = _serializar_card(card, tem_novidade=tem_novidade)
+            card_dict['checklists']    = checklists_data
+            card_dict['comentarios']   = comentarios_data
+            cards_data.append(card_dict)
 
+    colunas = ColunasBoard.objects.filter(projeto=sprint.projeto).order_by('posicao')
     return Response({
         'id':          sprint.id,
         'nome':        sprint.nome,
@@ -1056,6 +1356,10 @@ def sprint_detail(request, sprint_id):
         'data_inicio': sprint.data_inicio,
         'data_fim':    sprint.data_fim,
         'projeto_id':  sprint.projeto_id,
+        'colunas': [
+            {'id': c.id, 'nome': c.nome, 'posicao': c.posicao, 'e_inicial': c.e_inicial, 'e_final': c.e_final}
+            for c in colunas
+        ],
         'cards':       cards_data,
     })
 
@@ -1079,26 +1383,80 @@ def sprint_encerrar(request, sprint_id):
     if sprint.status != 'ATIVA':
         return Response({'detail': 'Apenas sprints ATIVAS podem ser encerradas.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    proxima_sprint_id  = request.data.get('proxima_sprint_id')
+    acao = request.data.get('acao', 'iniciar_planejada')
+    proxima_sprint_id = request.data.get('proxima_sprint_id')
     cards_para_backlog = request.data.get('cards_para_backlog', [])
     cards_para_sprint  = request.data.get('cards_para_sprint', [])
 
-    if cards_para_backlog:
-        Card.objects.filter(pk__in=cards_para_backlog, sprint=sprint).update(sprint=None)
+    if acao not in ('iniciar_planejada', 'pausar'):
+        return Response({'detail': 'acao deve ser iniciar_planejada ou pausar.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if proxima_sprint_id and cards_para_sprint:
+    coluna_inicial = _coluna_inicial(projeto)
+    if coluna_inicial is None:
+        return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    proxima = None
+    with transaction.atomic():
         try:
-            proxima = Sprint.objects.get(pk=proxima_sprint_id, projeto=projeto)
-            Card.objects.filter(pk__in=cards_para_sprint, sprint=sprint).update(sprint=proxima)
+            sprint.status       = 'ENCERRADA'
+            sprint.data_fim     = timezone.now().date()
+            sprint.encerrada_em = timezone.now()
+            sprint.save(update_fields=['status', 'data_fim', 'encerrada_em'])
+            _registrar_snapshot_sprint(sprint)
+
+            if acao == 'iniciar_planejada':
+                if proxima_sprint_id:
+                    proxima = Sprint.objects.get(pk=proxima_sprint_id, projeto=projeto, status='PLANEJADA')
+                else:
+                    proxima = Sprint.objects.filter(projeto=projeto, status='PLANEJADA').order_by('id').first()
+                    if proxima is None:
+                        proxima = Sprint.objects.create(
+                            projeto=projeto,
+                            nome=_gerar_nome_sprint(projeto),
+                            status='PLANEJADA',
+                            criado_por=request.user,
+                        )
+                proxima.status = 'ATIVA'
+                proxima.data_inicio = timezone.now().date()
+                proxima.save(update_fields=['status', 'data_inicio'])
+        except IntegrityError:
+            return Response(
+                {'detail': 'Não foi possível iniciar a sprint planejada. Verifique se já existe uma sprint ativa.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Sprint.DoesNotExist:
-            return Response({'detail': 'Próxima sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            return Response({'detail': 'Sprint planejada não encontrada.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    sprint.status       = 'ENCERRADA'
-    sprint.data_fim     = timezone.now().date()
-    sprint.encerrada_em = timezone.now()
-    sprint.save(update_fields=['status', 'data_fim', 'encerrada_em'])
+        if cards_para_backlog:
+            Card.objects.filter(pk__in=cards_para_backlog, sprint=sprint).update(
+                sprint=None,
+                responsavel=None,
+                due_date=None,
+                estimativa_consolidada=None,
+                pronto_para_estimativa=False,
+            )
 
-    return Response({'id': sprint.id, 'status': sprint.status, 'data_fim': sprint.data_fim})
+        if cards_para_sprint and proxima:
+            cards_migrados = Card.objects.filter(pk__in=cards_para_sprint, sprint=sprint)
+            cards_migrados.filter(coluna__nome=COLUNA_VALIDACAO_NOME).update(
+                sprint=proxima,
+            )
+            cards_migrados.exclude(coluna__nome=COLUNA_VALIDACAO_NOME).update(
+                sprint=proxima,
+                coluna=coluna_inicial,
+            )
+
+    return Response({
+        'id': sprint.id,
+        'status': sprint.status,
+        'data_fim': sprint.data_fim,
+        'proxima_sprint': {
+            'id': proxima.id,
+            'nome': proxima.nome,
+            'status': proxima.status,
+            'data_inicio': proxima.data_inicio,
+        } if proxima else None,
+    })
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1113,11 +1471,11 @@ def projeto_cards(request, projeto_id):
     if err:
         return err
 
-    if not request.user.admin and cargo != 'GERENTE':
-        return Response({'detail': 'Apenas Gerentes podem criar cards.'}, status=status.HTTP_403_FORBIDDEN)
-
     titulo = request.data.get('titulo', '').strip()
     tipo   = request.data.get('tipo', 'TAREFA').upper()
+
+    if not request.user.admin and cargo != 'GERENTE' and not (cargo == 'QA' and tipo == 'BUG'):
+        return Response({'detail': 'Apenas Gerentes podem criar cards. QA pode criar BUG.'}, status=status.HTTP_403_FORBIDDEN)
 
     if not titulo:
         return Response({'detail': 'Título é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1129,16 +1487,25 @@ def projeto_cards(request, projeto_id):
     responsavel_id = request.data.get('responsavel_id')
     due_date       = request.data.get('due_date')
     descricao      = request.data.get('descricao', '')
+    criterios_aceitacao = request.data.get('criterios_aceitacao')
+    estimativa_consolidada = request.data.get('estimativa_consolidada')
+    pronto_para_estimativa = bool(request.data.get('pronto_para_estimativa', False))
 
-    coluna = (
-        ColunasBoard.objects.filter(projeto=projeto, e_inicial=True).first()
-        or ColunasBoard.objects.filter(projeto=projeto).order_by('posicao').first()
-    )
+    if prioridade not in ('BAIXA', 'MEDIA', 'ALTA', 'URGENTE'):
+        return Response({'detail': 'prioridade deve ser BAIXA, MEDIA, ALTA ou URGENTE.'}, status=status.HTTP_400_BAD_REQUEST)
+    if not sprint_id and any(value not in (None, '', False) for value in (responsavel_id, due_date, estimativa_consolidada, pronto_para_estimativa)):
+        return Response(
+            {'detail': 'Cards no backlog são sugestões; responsável, prazo e estimativa só são definidos na sprint.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    coluna = _coluna_inicial(projeto)
     if coluna is None:
         return Response({'detail': 'Projeto não possui colunas configuradas.'}, status=status.HTTP_400_BAD_REQUEST)
 
     card_kwargs = dict(
         projeto=projeto,
+        codigo=_gerar_codigo_card(),
         titulo=titulo,
         tipo=tipo,
         prioridade=prioridade,
@@ -1146,6 +1513,12 @@ def projeto_cards(request, projeto_id):
         coluna=coluna,
         criado_por=request.user,
     )
+    if criterios_aceitacao is not None:
+        card_kwargs['criterios_aceitacao'] = criterios_aceitacao
+    if estimativa_consolidada not in (None, ''):
+        card_kwargs['estimativa_consolidada'] = estimativa_consolidada
+    if pronto_para_estimativa:
+        card_kwargs['pronto_para_estimativa'] = True
 
     if sprint_id:
         try:
@@ -1154,13 +1527,21 @@ def projeto_cards(request, projeto_id):
             return Response({'detail': 'Sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
     if responsavel_id:
-        try:
-            card_kwargs['responsavel'] = Usuario.objects.get(pk=responsavel_id)
-        except Usuario.DoesNotExist:
+        responsavel = _usuario_ativo(responsavel_id)
+        if responsavel is None:
             return Response({'detail': 'Responsável não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
+        if not _eh_membro_do_projeto(responsavel, projeto):
+            return Response({'detail': 'Responsável deve ser membro do projeto.'}, status=status.HTTP_400_BAD_REQUEST)
+        card_kwargs['responsavel'] = responsavel
 
-    if due_date:
+    if due_date == 'SPRINT_ATUAL':
+        if not sprint_id:
+            return Response({'detail': 'Card precisa estar em sprint para atrelar entrega à sprint.'}, status=status.HTTP_400_BAD_REQUEST)
+        card_kwargs['due_date'] = card_kwargs['sprint'].data_inicio or timezone.now().date()
+    elif due_date:
         card_kwargs['due_date'] = due_date
+    elif sprint_id and request.data.get('entrega_na_sprint'):
+        card_kwargs['due_date'] = card_kwargs['sprint'].data_inicio or timezone.now().date()
 
     if tipo == 'BUG':
         card_kwargs['passos_reproducao']  = request.data.get('passos_reproducao', '')
@@ -1175,6 +1556,8 @@ def projeto_cards(request, projeto_id):
 
     card = Card.objects.create(**card_kwargs)
     _registrar_historico(card, request.user, 'CRIACAO', f'Card criado como {tipo}.')
+    if card.responsavel_id:
+        _notificar_responsavel_atribuido(card, request.user)
 
     return Response(_serializar_card(card), status=status.HTTP_201_CREATED)
 
@@ -1194,7 +1577,7 @@ def cards_list(request):
     if request.query_params.get('responsavel') == 'me':
         cards = cards.filter(responsavel=user)
 
-    cards = cards.select_related('responsavel', 'coluna').order_by('-criado_em')
+    cards = cards.select_related('responsavel', 'coluna', 'sprint').order_by('-criado_em')
     return Response([_serializar_card(c) for c in cards])
 
 
@@ -1219,6 +1602,15 @@ def card_detail(request, card_id):
         data['passos_reproducao']  = getattr(card, 'passos_reproducao', None)
         data['resultado_esperado'] = getattr(card, 'resultado_esperado', None)
         data['card_origem_id']     = card.card_origem_id
+        data['bugs_gerados'] = [
+            {
+                'id': bug.id,
+                'codigo': f'#{bug.codigo}' if bug.codigo else None,
+                'titulo': bug.titulo,
+                'status': _status_card(bug),
+            }
+            for bug in card.bugs_gerados.select_related('coluna').order_by('-criado_em')
+        ]
         return Response(data)
 
     if request.method == 'DELETE':
@@ -1227,12 +1619,70 @@ def card_detail(request, card_id):
         card.delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    is_manager = request.user.admin or cargo == 'GERENTE'
+    can_edit_bug = cargo == 'QA' and card.tipo == 'BUG'
+    is_assignee = card.responsavel_id == request.user.id
+    simple_fields_requested = any(campo in request.data for campo in [
+        'titulo', 'descricao', 'criterios_aceitacao', 'prioridade',
+        'passos_reproducao', 'resultado_esperado', 'due_date',
+        'estimativa_consolidada', 'sprint_id',
+    ])
+    column_requested = 'coluna_id' in request.data
+    responsible_requested = 'responsavel_id' in request.data
+    backlog_execution_fields = {'responsavel_id', 'due_date', 'estimativa_consolidada', 'coluna_id'}
+    if card.sprint_id is None and any(campo in request.data for campo in backlog_execution_fields):
+        return Response(
+            {'detail': 'Cards no backlog são sugestões; responsável, prazo, estimativa e coluna só são definidos na sprint.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    if simple_fields_requested and not (is_manager or can_edit_bug):
+        return Response({'detail': 'Apenas Gerentes podem editar dados do card. QA pode editar BUG.'}, status=status.HTTP_403_FORBIDDEN)
+    if column_requested and not (is_manager or is_assignee):
+        return Response({'detail': 'Apenas Gerentes ou o responsável podem mover o card.'}, status=status.HTTP_403_FORBIDDEN)
+    if responsible_requested and not (is_manager or can_edit_bug):
+        requested_responsavel = request.data['responsavel_id']
+        try:
+            requested_responsavel_id = int(requested_responsavel)
+        except (TypeError, ValueError):
+            requested_responsavel_id = None
+        if card.responsavel_id is not None or requested_responsavel_id != request.user.id:
+            return Response({'detail': 'Você só pode assumir cards sem responsável.'}, status=status.HTTP_403_FORBIDDEN)
+
     # PATCH — 'status' NÃO entra (property derivada). Use 'coluna_id'.
-    campos_simples = ['titulo', 'descricao', 'prioridade',
+    campos_simples = ['titulo', 'descricao', 'criterios_aceitacao', 'prioridade',
                       'passos_reproducao', 'resultado_esperado']
     for campo in campos_simples:
         if campo in request.data:
-            setattr(card, campo, request.data[campo])
+            valor = request.data[campo]
+            if campo == 'prioridade':
+                valor = valor.upper()
+                if valor not in ('BAIXA', 'MEDIA', 'ALTA', 'URGENTE'):
+                    return Response({'detail': 'prioridade deve ser BAIXA, MEDIA, ALTA ou URGENTE.'}, status=status.HTTP_400_BAD_REQUEST)
+            setattr(card, campo, valor)
+
+    if 'sprint_id' in request.data:
+        sprint_id = request.data['sprint_id']
+        if sprint_id in (None, ''):
+            card.sprint = None
+            card.responsavel = None
+            card.due_date = None
+            card.estimativa_consolidada = None
+            card.pronto_para_estimativa = False
+            _registrar_historico(card, request.user, 'MUDANCA_SPRINT', 'Card movido para backlog.')
+        else:
+            try:
+                nova_sprint = Sprint.objects.get(pk=sprint_id, projeto=projeto)
+            except Sprint.DoesNotExist:
+                return Response({'detail': 'Sprint não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
+            if nova_sprint.status != 'ATIVA':
+                return Response({'detail': 'Cards só podem entrar em sprint ativa.'}, status=status.HTTP_400_BAD_REQUEST)
+            coluna_inicial = _coluna_inicial(projeto)
+            if coluna_inicial is None:
+                return Response({'detail': 'Projeto não possui coluna inicial configurada.'}, status=status.HTTP_400_BAD_REQUEST)
+            card.sprint = nova_sprint
+            card.coluna = coluna_inicial
+            _registrar_historico(card, request.user, 'MUDANCA_SPRINT', f'Card movido para {nova_sprint.nome}.')
 
     if 'coluna_id' in request.data:
         try:
@@ -1240,7 +1690,7 @@ def card_detail(request, card_id):
         except ColunasBoard.DoesNotExist:
             return Response({'detail': 'Coluna não encontrada.'}, status=status.HTTP_404_NOT_FOUND)
 
-        if card.coluna and card.coluna.nome == COLUNA_VALIDACAO_NOME:
+        if card.coluna and card.coluna.nome == COLUNA_VALIDACAO_NOME and not is_assignee:
             if cargo not in ('QA', 'GERENTE') and not request.user.admin:
                 return Response(
                     {'detail': 'Apenas QA ou Gerentes podem mover cards para fora de Validação.'},
@@ -1252,22 +1702,37 @@ def card_detail(request, card_id):
         _registrar_historico(card, request.user, 'MUDANCA_COLUNA',
                              f'{coluna_anterior} → {nova_coluna.nome}')
 
+    notificar_responsavel = False
     if 'responsavel_id' in request.data:
         resp_id = request.data['responsavel_id']
         if resp_id is None:
             card.responsavel = None
         else:
             try:
-                novo_resp = Usuario.objects.get(pk=resp_id)
+                novo_resp = Usuario.objects.get(pk=resp_id, ativo=True)
+                if not _eh_membro_do_projeto(novo_resp, projeto):
+                    return Response({'detail': 'Responsável deve ser membro do projeto.'}, status=status.HTTP_400_BAD_REQUEST)
                 antigo = card.responsavel.nome if card.responsavel else 'Ninguém'
+                antigo_id = card.responsavel_id
                 card.responsavel = novo_resp
                 _registrar_historico(card, request.user, 'MUDANCA_RESPONSAVEL',
                                      f'{antigo} → {novo_resp.nome}')
+                notificar_responsavel = antigo_id != novo_resp.id
             except Usuario.DoesNotExist:
                 return Response({'detail': 'Responsável não encontrado.'}, status=status.HTTP_404_NOT_FOUND)
 
     if 'due_date' in request.data:
-        if card.sprint and card.sprint.status == 'ATIVA':
+        novo_due_date_raw = request.data['due_date']
+        if novo_due_date_raw == 'SPRINT_ATUAL':
+            if not card.sprint_id:
+                return Response({'detail': 'Card precisa estar em sprint para atrelar entrega à sprint.'}, status=status.HTTP_400_BAD_REQUEST)
+            novo_due_date = card.sprint.data_inicio or timezone.now().date()
+        else:
+            novo_due_date_raw = novo_due_date_raw or None
+            novo_due_date = parse_date(novo_due_date_raw) if isinstance(novo_due_date_raw, str) else novo_due_date_raw
+            if novo_due_date_raw and novo_due_date is None:
+                return Response({'detail': 'due_date deve usar o formato YYYY-MM-DD ou SPRINT_ATUAL.'}, status=status.HTTP_400_BAD_REQUEST)
+        if card.sprint and card.sprint.status == 'ATIVA' and card.due_date != novo_due_date:
             justificativa = request.data.get('justificativa_prazo', '').strip()
             if not justificativa:
                 return Response(
@@ -1280,11 +1745,27 @@ def card_detail(request, card_id):
                 usuario=request.user,
                 justificativa=justificativa,
                 due_date_anterior=card.due_date,
-                due_date_nova=request.data['due_date'],
+                due_date_nova=novo_due_date,
             )
-        card.due_date = request.data['due_date']
+        card.due_date = novo_due_date
+
+    if 'estimativa_consolidada' in request.data:
+        valor = request.data['estimativa_consolidada']
+        if valor in (None, ''):
+            card.estimativa_consolidada = None
+        else:
+            try:
+                valor = int(valor)
+            except (TypeError, ValueError):
+                return Response({'detail': 'estimativa_consolidada deve ser numérica.'}, status=status.HTTP_400_BAD_REQUEST)
+            if valor not in PLANNING_POKER_VALORES:
+                return Response({'detail': 'estimativa_consolidada deve ser 1, 2, 3, 5, 8, 13 ou 21.'}, status=status.HTTP_400_BAD_REQUEST)
+            card.estimativa_consolidada = valor
+            card.pronto_para_estimativa = False
 
     card.save()
+    if notificar_responsavel:
+        _notificar_responsavel_atribuido(card, request.user)
     return Response(_serializar_card(card))
 
 
@@ -1346,6 +1827,15 @@ def _get_card_e_cargo(request, card_id):
     return card, cargo, err
 
 
+def _bloquear_mutacao_backlog(card):
+    if card.sprint_id is None:
+        return Response(
+            {'detail': 'Cards no backlog são sugestões; mova para uma sprint antes de editar dados de execução.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    return None
+
+
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def card_estimativa_enviar(request, card_id):
@@ -1353,6 +1843,9 @@ def card_estimativa_enviar(request, card_id):
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
 
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes podem iniciar estimativas.'}, status=status.HTTP_403_FORBIDDEN)
@@ -1382,6 +1875,10 @@ def card_estimativas(request, card_id):
         return err
 
     if request.method == 'POST':
+        blocked = _bloquear_mutacao_backlog(card)
+        if blocked:
+            return blocked
+
         if cargo not in ('DEV', 'QA') and not request.user.admin:
             return Response({'detail': 'Apenas DEV e QA podem votar.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1391,6 +1888,15 @@ def card_estimativas(request, card_id):
         valor = request.data.get('valor')
         if valor is None:
             return Response({'detail': 'valor é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+        valor = str(valor)
+        if valor != '?':
+            try:
+                valor_num = int(valor)
+            except ValueError:
+                return Response({'detail': 'valor deve ser 1, 2, 3, 5, 8, 13, 21 ou ?.'}, status=status.HTTP_400_BAD_REQUEST)
+            if valor_num not in PLANNING_POKER_VALORES:
+                return Response({'detail': 'valor deve ser 1, 2, 3, 5, 8, 13, 21 ou ?.'}, status=status.HTTP_400_BAD_REQUEST)
+            valor = str(valor_num)
 
         estimativa, _ = Estimativa.objects.update_or_create(
             card=card, usuario=request.user,
@@ -1401,16 +1907,20 @@ def card_estimativas(request, card_id):
     votos = Estimativa.objects.filter(card=card).select_related('usuario')
     revelados = votos.filter(revelada=True).exists()
 
-    if revelados or request.user.admin or cargo == 'GERENTE':
-        data = [
-            {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome,
-             'valor': v.valor, 'revelada': v.revelada}
-            for v in votos
-        ]
+    if request.user.admin or cargo == 'GERENTE':
+        data = {
+            'votantes': [
+                {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome, 'votou': True}
+                for v in votos
+            ],
+            'votos_recebidos': [v.valor for v in votos],
+            'revelada': revelados,
+        }
     else:
         data = [
             {'usuario_id': v.usuario_id, 'usuario_nome': v.usuario.nome,
              'valor': v.valor if v.usuario == request.user else None,
+             'votou': v.usuario == request.user,
              'revelada': v.revelada}
             for v in votos
         ]
@@ -1425,6 +1935,9 @@ def card_estimativa_revelar(request, card_id):
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
 
     if not request.user.admin and cargo != 'GERENTE':
         return Response({'detail': 'Apenas Gerentes podem revelar estimativas.'}, status=status.HTTP_403_FORBIDDEN)
@@ -1432,6 +1945,12 @@ def card_estimativa_revelar(request, card_id):
     estimativa_consolidada = request.data.get('estimativa_consolidada')
     if estimativa_consolidada is None:
         return Response({'detail': 'estimativa_consolidada é obrigatória.'}, status=status.HTTP_400_BAD_REQUEST)
+    try:
+        estimativa_consolidada = int(estimativa_consolidada)
+    except (TypeError, ValueError):
+        return Response({'detail': 'estimativa_consolidada deve ser numérica.'}, status=status.HTTP_400_BAD_REQUEST)
+    if estimativa_consolidada not in PLANNING_POKER_VALORES:
+        return Response({'detail': 'estimativa_consolidada deve ser 1, 2, 3, 5, 8, 13 ou 21.'}, status=status.HTTP_400_BAD_REQUEST)
 
     Estimativa.objects.filter(card=card).update(revelada=True)
     card.estimativa_consolidada = estimativa_consolidada
@@ -1474,6 +1993,10 @@ def card_checklists(request, card_id):
             for cl in cls
         ])
 
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
+
     titulo = request.data.get('titulo', '').strip()
     if not titulo:
         return Response({'detail': 'Título é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1496,6 +2019,9 @@ def checklist_detail(request, checklist_id):
     _, _, err = _get_projeto_ou_403(request.user, cl.card.projeto_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(cl.card)
+    if blocked:
+        return blocked
 
     if request.method == 'PATCH':
         if 'titulo' in request.data:
@@ -1521,6 +2047,9 @@ def checklist_itens(request, checklist_id):
     _, _, err = _get_projeto_ou_403(request.user, cl.card.projeto_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(cl.card)
+    if blocked:
+        return blocked
 
     texto = request.data.get('texto', '').strip()
     if not texto:
@@ -1543,6 +2072,9 @@ def checklist_item_detail(request, item_id):
     _, _, err = _get_projeto_ou_403(request.user, item.checklist.card.projeto_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(item.checklist.card)
+    if blocked:
+        return blocked
 
     if request.method == 'PATCH':
         if 'texto' in request.data:
@@ -1664,14 +2196,37 @@ def card_comentarios(request, card_id):
     if request.method == 'GET':
         comentarios = Comentario.objects.filter(card=card).select_related(
             'autor'
-        ).prefetch_related('anexos').order_by('criado_em')
+        ).prefetch_related('anexos', 'mencoes__usuario').order_by('criado_em')
         return Response([_serializar_comentario(c) for c in comentarios])
+
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
 
     texto = request.data.get('texto', '').strip()
     if not texto:
         return Response({'detail': 'Texto é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
 
     comentario = Comentario.objects.create(card=card, autor=request.user, texto=texto)
+    mencionados_ids = _ids_mencionados(request)
+    mencionados = Usuario.objects.filter(
+        id__in=mencionados_ids,
+        ativo=True,
+        membros_projetos__projeto_id=card.projeto_id,
+    ).distinct()
+    mencionados = list(mencionados)
+    ComentarioMencao.objects.bulk_create(
+        [
+            ComentarioMencao(comentario=comentario, usuario=mencionado)
+            for mencionado in mencionados
+        ],
+        ignore_conflicts=True,
+    )
+    mencionados_emails = {
+        mencionado.email
+        for mencionado in mencionados
+        if mencionado.pk != request.user.pk
+    }
 
     destinatarios = set()
     if card.responsavel and card.responsavel != request.user:
@@ -1680,12 +2235,27 @@ def card_comentarios(request, card_id):
         autor=request.user
     ).values_list('autor__email', flat=True).distinct()
     destinatarios.update(participantes)
+    destinatarios.difference_update(mencionados_emails)
 
     for email in destinatarios:
         _enviar_email(
             email,
             f'Novo comentário em "{card.titulo}"',
             f'{request.user.nome} comentou:\n\n{texto}',
+        )
+
+    for mencionado in mencionados:
+        if mencionado.pk == request.user.pk:
+            continue
+        _enviar_email(
+            mencionado.email,
+            f'Você foi mencionado em {card.codigo and f"#{card.codigo}" or f"card {card.id}"}',
+            (
+                f'{request.user.nome} mencionou você em um comentário.\n\n'
+                f'Projeto: {card.projeto.nome}\n'
+                f'Card: {card.codigo and f"#{card.codigo}" or f"#{card.id}"} - {card.titulo}\n\n'
+                f'Comentário:\n{texto}'
+            ),
         )
 
     membros_ids = ProjetoMembro.objects.filter(
@@ -1717,6 +2287,9 @@ def comentario_detail(request, comentario_id):
     _, cargo, err = _get_projeto_ou_403(request.user, comentario.card.projeto_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(comentario.card)
+    if blocked:
+        return blocked
 
     eh_autor   = comentario.autor == request.user
     eh_gerente = cargo == 'GERENTE' or request.user.admin
@@ -1749,12 +2322,18 @@ def card_anexos(request, card_id):
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
 
     arquivo = request.FILES.get('arquivo')
     if not arquivo:
         return Response({'detail': 'Arquivo é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+    invalid = _validar_anexo_permitido(arquivo)
+    if invalid:
+        return invalid
 
-    url = request.data.get('url', f'/media/anexos/{arquivo.name}')
+    url = request.data.get('url') or _salvar_arquivo_anexo(arquivo)
 
     anexo = Anexo.objects.create(
         card=card,
@@ -1763,10 +2342,7 @@ def card_anexos(request, card_id):
         nome_arquivo=arquivo.name,
         mime_type=arquivo.content_type,
     )
-    return Response(
-        {'id': anexo.id, 'nome': anexo.nome_arquivo, 'url': anexo.url},
-        status=status.HTTP_201_CREATED,
-    )
+    return Response(_serializar_anexo(anexo), status=status.HTTP_201_CREATED)
 
 
 @api_view(['POST'])
@@ -1781,12 +2357,18 @@ def comentario_anexos(request, comentario_id):
     _, _, err = _get_projeto_ou_403(request.user, comentario.card.projeto_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(comentario.card)
+    if blocked:
+        return blocked
 
     arquivo = request.FILES.get('arquivo')
     if not arquivo:
         return Response({'detail': 'Arquivo é obrigatório.'}, status=status.HTTP_400_BAD_REQUEST)
+    invalid = _validar_anexo_permitido(arquivo)
+    if invalid:
+        return invalid
 
-    url = request.data.get('url', f'/media/anexos/{arquivo.name}')
+    url = request.data.get('url') or _salvar_arquivo_anexo(arquivo)
 
     anexo = Anexo.objects.create(
         comentario=comentario,
@@ -1796,10 +2378,7 @@ def comentario_anexos(request, comentario_id):
         nome_arquivo=arquivo.name,
         mime_type=arquivo.content_type,
     )
-    return Response(
-        {'id': anexo.id, 'nome': anexo.nome_arquivo, 'url': anexo.url},
-        status=status.HTTP_201_CREATED,
-    )
+    return Response(_serializar_anexo(anexo), status=status.HTTP_201_CREATED)
 
 
 @api_view(['DELETE'])
@@ -1827,8 +2406,10 @@ def anexo_detail(request, anexo_id):
     if not eh_dono and not eh_gerente:
         return Response({'detail': 'Sem permissão para remover este anexo.'}, status=status.HTTP_403_FORBIDDEN)
 
-    # Anexo.url é TextField — NÃO chamar arquivo.delete().
+    caminho_storage = _caminho_storage_anexo(anexo.url)
     anexo.delete()
+    if caminho_storage:
+        default_storage.delete(caminho_storage)
     return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -1858,6 +2439,10 @@ def card_validacao(request, card_id):
             for v in validacoes
         ])
 
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
+
     if cargo != 'QA' and not request.user.admin:
         return Response({'detail': 'Apenas membros com cargo QA podem registrar validações.'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -1866,6 +2451,8 @@ def card_validacao(request, card_id):
 
     if resultado not in ('APROVADO', 'REPROVADO'):
         return Response({'detail': 'resultado deve ser APROVADO ou REPROVADO.'}, status=status.HTTP_400_BAD_REQUEST)
+    if resultado == 'REPROVADO' and not observacao.strip():
+        return Response({'detail': 'Observação é obrigatória ao reprovar um card.'}, status=status.HTTP_400_BAD_REQUEST)
 
     validacao = ValidacaoQA.objects.create(
         card=card, qa=request.user, resultado=resultado, observacao=observacao
@@ -1875,12 +2462,19 @@ def card_validacao(request, card_id):
     if card.responsavel:
         _enviar_email(
             card.responsavel.email,
-            f'Validação QA — {card.titulo}',
+            f'Validação — {card.titulo}',
             f'O QA {request.user.nome} registrou: {resultado}\n\n{observacao}',
         )
 
     return Response(
-        {'id': validacao.id, 'resultado': resultado, 'observacao': observacao},
+        {
+            'id': validacao.id,
+            'resultado': resultado,
+            'observacao': observacao,
+            'qa_id': validacao.qa_id,
+            'qa_nome': validacao.qa.nome,
+            'criado_em': validacao.criado_em,
+        },
         status=status.HTTP_201_CREATED,
     )
 
@@ -1896,6 +2490,17 @@ def card_impedimento(request, card_id):
     card, cargo, err = _get_card_e_cargo(request, card_id)
     if err:
         return err
+    blocked = _bloquear_mutacao_backlog(card)
+    if blocked:
+        return blocked
+
+    is_manager = request.user.admin or cargo == 'GERENTE'
+    is_assignee = card.responsavel_id == request.user.id
+    if not (is_manager or is_assignee):
+        return Response(
+            {'detail': 'Apenas Gerentes ou o responsável podem alterar impedimento do card.'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
 
     if request.method == 'POST':
         comentario = request.data.get('comentario', '').strip()

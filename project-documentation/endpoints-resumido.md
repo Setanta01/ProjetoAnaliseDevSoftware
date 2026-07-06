@@ -57,6 +57,7 @@
 | `GET`   | `/admin/usuarios/`      | `[ADMIN]` | Lista utilizadores do sistema, flags admin e status.                 |
 | `PATCH` | `/admin/usuarios/<id>/` | `[ADMIN]` | Ativa/desativa utilizador ou altera flag `admin`.                    |
 | `GET`   | `/admin/stats/`         | `[ADMIN]` | Retorna métricas globais (utilizadores, projetos, cards).            |
+| `GET`   | `/usuarios/`            | `[AUTH]`  | Lista usuários ativos para seleção em membros de projeto.            |
 
 ## 4. Projetos e Membros
 
@@ -64,7 +65,7 @@
 | ----------- | ----------------------------------- | ------------- | ------------------------------------------------------------------------------------------------- |
 | `GET`       | `/projetos/`                        | `[AUTH]`      | Lista projetos onde o utilizador é membro.                                                        |
 | `GET`       | `/admin/projetos/`                  | `[ADMIN]`     | Lista todos os projetos da organização.                                                           |
-| `POST`      | `/admin/projetos/`                  | `[ADMIN]`     | Cria projeto e vincula colunas Kanban padrão.                                                     |
+| `POST`      | `/admin/projetos/`                  | `[ADMIN]`     | **Payload:** `nome`, `descricao`, `gerente_id`. Cria projeto, vincula colunas Kanban padrão e adiciona o gerente inicial. |
 | `GET`       | `/projetos/<id>/`                   | `[MEMBRO]`    | Retorna detalhes do projeto, membros e sprints ativas.                                            |
 | `PUT/PATCH` | `/projetos/<id>/`                   | `[ADMIN/GER]` | Atualiza dados ou arquiva projeto.                                                                |
 | `DELETE`    | `/admin/projetos/<id>/`             | `[ADMIN]`     | Soft delete do projeto (exige dupla confirmação).                                                 |
@@ -79,11 +80,11 @@
 | Método | Rota                      | Perm.      | Descrição e Payload                                                                                          |
 | ------ | ------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------ |
 | `GET`  | `/projetos/<id>/backlog/` | `[MEMBRO]` | Lista cards sem sprint, ordenados por prioridade.                                                            |
-| `GET`  | `/projetos/<id>/sprints/` | `[MEMBRO]` | Lista histórico, ativa e planeada do projeto.                                                                |
-| `POST` | `/projetos/<id>/sprints/` | `[GER]`    | **Payload:** `nome`. Cria sprint planeada (máx 1 ativa e 1 planeada).                                        |
-| `POST` | `/sprints/<id>/iniciar/`  | `[GER]`    | Inicia sprint (status → ATIVA).                                                                              |
-| `GET`  | `/sprints/<id>/`          | `[MEMBRO]` | Retorna árvore completa da sprint (cards, checklists, comentários, flags).                                   |
-| `POST` | `/sprints/<id>/encerrar/` | `[GER]`    | **Payload:** `proxima_sprint_id`, `cards_para_backlog`, `cards_para_sprint`. Encerra e distribui pendências. |
+| `GET`  | `/projetos/<id>/sprints/` | `[MEMBRO]` | Lista o historico e a sprint ativa do projeto.                                                               |
+| `POST` | `/projetos/<id>/sprints/` | `[GER]`    | **Payload opcional:** `nome`. Mantido por compatibilidade; a UI não cria mais sprint planejada manualmente. |
+| `POST` | `/sprints/<id>/iniciar/`  | `[GER]`    | Inicia sprint (status → ATIVA). Se houver cards pendentes na última sprint encerrada do projeto, eles migram para `To do`. |
+| `GET`  | `/sprints/<id>/`          | `[MEMBRO]` | Retorna árvore completa da sprint ativa. Para sprint encerrada com snapshot, retorna a lista histórica de cards capturada no encerramento. |
+| `POST` | `/sprints/<id>/encerrar/` | `[GER]`    | **Payload:** `acao` (`iniciar_planejada` ou `pausar`), `cards_para_backlog`, `cards_para_sprint`. Se iniciar próxima sem `proxima_sprint_id`, o backend cria a próxima sprint automaticamente. |
 
 ## 6. Cards (Tarefas e Bugs)
 
@@ -91,10 +92,10 @@
 
 | Método   | Rota                        | Perm.      | Descrição e Payload                                                                                                                                                               |
 | -------- | --------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST`   | `/projetos/<id>/cards/`     | `[GER]`    | **Payload:** `titulo`, `tipo` (TAREFA/BUG), `prioridade`, `sprint_id`, `responsavel_id`, `due_date`. Se BUG, aceita `passos_reproducao`, `resultado_esperado` e `card_origem_id`. |
+| `POST`   | `/projetos/<id>/cards/`     | `[GER/QA]` | **Payload:** `titulo`, `tipo` (TAREFA/BUG), `sprint_id`, `prioridade`, `responsavel_id`, `due_date`, `criterios_aceitacao`, `estimativa_consolidada`, `pronto_para_estimativa`. QA pode criar apenas `BUG`. Sem `sprint_id`, o card fica no backlog como sugestao e nao aceita responsavel, prazo, estimativa, comentarios, checklists, anexos ou validacao. Para entrega na sprint atual, enviar `due_date="SPRINT_ATUAL"` ou `entrega_na_sprint=true`. Se BUG, aceita `passos_reproducao`, `resultado_esperado` e `card_origem_id`. |
 | `GET`    | `/cards/`                   | `[MEMBRO]` | Lista geral de cards. Aceita query param `?responsavel=me` para filtrar próprias tarefas.                                                                                         |
 | `GET`    | `/cards/<id>/`              | `[MEMBRO]` | Detalhes completos do card.                                                                                                                                                       |
-| `PATCH`  | `/cards/<id>/`              | `[MEMBRO]` | Atualiza campos, move `coluna_id` ou altera responsável. **Nota:** Alterar `due_date` ativo exige `justificativa_prazo`.                                                          |
+| `PATCH`  | `/cards/<id>/`              | `[MEMBRO]` | Atualiza campos, move `coluna_id` ou altera responsavel. Gerente edita cards gerais; QA pode editar BUG. `sprint_id=null` move para backlog e limpa dados especificos da sprint. Cards no backlog só aceitam dados de sugestao; responsavel, prazo, estimativa, coluna, comentarios, checklist, anexos e validacao ficam bloqueados ate entrar em sprint. `due_date="SPRINT_ATUAL"` atrela entrega à sprint atual; `due_date=null` remove esse vínculo. |
 | `DELETE` | `/cards/<id>/`              | `[GER]`    | Remove o card.                                                                                                                                                                    |
 | `GET`    | `/cards/<id>/historico/`    | `[MEMBRO]` | Lista registos de auditoria (mudança de coluna, responsável, etc).                                                                                                                |
 | `POST`   | `/cards/<id>/marcar-visto/` | `[MEMBRO]` | Regista leitura e limpa flags visuais de novidade para o utilizador.                                                                                                              |
@@ -104,7 +105,7 @@
 | Método | Rota                               | Perm.      | Descrição e Payload                                                         |
 | ------ | ---------------------------------- | ---------- | --------------------------------------------------------------------------- |
 | `POST` | `/cards/<id>/estimativas/enviar/`  | `[GER]`    | Marca card para estimativa e notifica membros.                              |
-| `POST` | `/cards/<id>/estimativas/`         | `[DEV/QA]` | **Payload:** `valor`. Submete voto secreto.                                 |
+| `POST` | `/cards/<id>/estimativas/`         | `[DEV/QA]` | **Payload:** `valor` (`1`, `2`, `3`, `5`, `8`, `13`, `21` ou `?`). Submete voto secreto. |
 | `POST` | `/cards/<id>/estimativas/revelar/` | `[GER]`    | **Payload:** `estimativa_consolidada`. Revela todos os votos e salva final. |
 | `GET`  | `/cards/<id>/estimativas/`         | `[MEMBRO]` | Retorna votos (apenas o próprio antes da revelação, todos após).            |
 
@@ -119,20 +120,20 @@
 | `GET`       | `/cards/<id>/vinculos/`           | `[MEMBRO]`   | Lista vínculos do card.                                            |
 | `POST`      | `/cards/<id>/vinculos/`           | `[GER]`      | **Payload:** `card_destino_id`, `tipo_vinculo`.                    |
 | `DELETE`    | `/cards/vinculos/<id>/`           | `[GER]`      | Remove o vínculo.                                                  |
-| `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentário. Notifica participantes.                  |
-| `PATCH/DEL` | `/cards/comentarios/<id>/`        | `[USER/GER]` | Edita ou remove o próprio comentário (Gerente remove qualquer um). |
-| `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card.                                 |
-| `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa ficheiro num comentário específico.                          |
+| `GET/POST`  | `/cards/<id>/comentarios/`        | `[MEMBRO]`   | Lista ou cria comentario. **POST:** `texto`, `mencionados_ids`. Notifica participantes e usuarios mencionados do projeto. A resposta inclui `mencionados`. Em backlog, o POST e bloqueado. |
+| `PATCH/DEL` | `/cards/comentarios/<id>/`        | `[USER/GER]` | Edita ou remove o proprio comentario (Gerente remove qualquer um). |
+| `POST`      | `/cards/<id>/anexos/`             | `[MEMBRO]`   | Upload de ficheiro direto no card. Aceita imagem, video, PDF e documento de texto, ate 65 MB. Em backlog o POST e bloqueado. |
+| `POST`      | `/cards/comentarios/<id>/anexos/` | `[MEMBRO]`   | Anexa imagem, video, PDF ou documento de texto num comentario especifico, ate 65 MB. |
 | `DELETE`    | `/cards/anexos/<id>/`             | `[USER/GER]` | Remove anexo.                                                      |
 
 ### Validação QA e Impedimentos
 
 | Método   | Rota                       | Perm.      | Descrição e Payload                                                            |
 | -------- | -------------------------- | ---------- | ------------------------------------------------------------------------------ |
-| `POST`   | `/cards/<id>/validacao/`   | `[QA]`     | **Payload:** `resultado` (APROVADO/REPROVADO), `observacao`. QA regista teste. |
+| `POST`   | `/cards/<id>/validacao/`   | `[QA/ADMIN]` | **Payload:** `resultado` (APROVADO/REPROVADO), `observacao`. A UI libera a acao apenas quando o card esta em Review. `observacao` e obrigatoria para `REPROVADO`. |
 | `GET`    | `/cards/<id>/validacao/`   | `[MEMBRO]` | Lista histórico de validações.                                                 |
-| `POST`   | `/cards/<id>/impedimento/` | `[MEMBRO]` | **Payload:** `comentario`. Marca card como impedido.                           |
-| `DELETE` | `/cards/<id>/impedimento/` | `[MEMBRO]` | Remove o impedimento do card.                                                  |
+| `POST`   | `/cards/<id>/impedimento/` | `[RESP/GER]` | **Payload:** `comentario`. Marca card como impedido.                           |
+| `DELETE` | `/cards/<id>/impedimento/` | `[RESP/GER]` | Remove o impedimento do card.                                                  |
 
 ## 7. Mapeamento: Banco de Dados × Endpoints
 

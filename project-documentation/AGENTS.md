@@ -10,12 +10,12 @@
 - **React Query e Short Polling**: O Board não utiliza WebSockets. A renderização consome a rota agregada `GET /api/sprints/<id>/` via short polling leve e otimiza interações da interface com *Optimistic Updates*. Qualquer mutação (ex: arrastar card, marcar checklist) deve executar um request `PATCH/POST` granular e invocar `invalidateQueries` para reatividade imediata.
 - **Regras de Negócio Inflexíveis**:
   - Sprints em planejamento (`PLANEJADA`) nascem **sem data de início ou fim**.
-  - As colunas de um Kanban (ex: To Do, Doing, QA, Done) são **fixas** e geradas na criação do projeto.
+  - As colunas de um Board são **fixas** e geradas na criação do projeto: `To do`, `In Progress`, `Review`, `Done`.
   - Prazos: Alterar o prazo (`due_date`) de um card ativo obriga o envio de uma `justificativa_prazo` no payload.
   - Votos Ocultos: No Planning Poker (`/api/cards/<id>/estimativas/`), desenvolvedores e QAs não enxergam os votos uns dos outros até que o Gerente use o endpoint de revelação.
   - Trava de QA: Apenas membros com o cargo de `QA` ou `GERENTE` no projeto podem movimentar um Card para fora da coluna de Validação/QA. O backend DEVE barrar isso ativamente.
 - **Autorização Contextual e Cargos**: A flag global `admin` dá poderes totais na plataforma, porém no fluxo principal os cargos (`GERENTE`, `DEV`, `QA`) existem estritamente dentro do escopo de um projeto (`projeto_membros`). Um usuário pode ser DEV em um projeto e GERENTE em outro. As validações nas rotas dependem desse contexto.
-- **Envio de E-mail**: Fluxos da API apenas criam jobs em `email_fila`, usando `transaction.on_commit()` quando dependem de uma alteração no banco. O comando `python manage.py process_email_queue` entrega as mensagens fora do request através do backend SMTP do Django. Não faça chamadas SMTP diretamente nas views.
+- **Envio de E-mail**: Fluxos da API apenas criam jobs em `email_fila`, usando `transaction.on_commit()` quando dependem de uma alteração no banco. O comando `python manage.py process_email_queue` entrega as mensagens fora do request através do backend SMTP do Django. Não faça chamadas SMTP diretamente nas views. Os gatilhos operacionais detalhados ficam em `project-documentation/detalhes-de-implementacao.md`.
 
 ## 🚀 Common Commands
 - **Backend (Setup e Execução)**:

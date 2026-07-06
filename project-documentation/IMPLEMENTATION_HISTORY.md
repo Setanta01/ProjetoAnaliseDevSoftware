@@ -12,39 +12,27 @@ prototype behavior.
 1. Rebuild the existing React frontend with strict TypeScript, Tailwind CSS,
    shadcn-compatible primitives, semantic tokens, reusable components, and
    React Query while preserving the prototype appearance and user flows.
-2. Provide a frontend-only mock state because Google OAuth, Resend, backend
-   data, and invitation delivery were not available for visual testing.
-3. Use the images in `samples_prototype/` as visual references.
-4. Remove admin dashboard content that was outside the plan: reports, global
+2. Use the images in `samples_prototype/` as visual references.
+3. Remove admin dashboard content that was outside the plan: reports, global
    role management, and recent-user widgets.
-5. Make **Meus Projetos** the authenticated landing page for every role.
-6. Keep an administrator's member-project list separate from the global project
+4. Make **Meus Projetos** the authenticated landing page for every role.
+5. Keep an administrator's member-project list separate from the global project
    administration page.
-7. Hide project-specific routes until a project is selected.
-8. Expand Board cards and task dialogs with documented flags, comments,
+6. Hide project-specific routes until a project is selected.
+7. Expand Board cards and task dialogs with documented flags, comments,
    subtasks/checklists, bug fields, and Planning Poker.
-9. Add first-administrator setup and invited-user activation screens.
-10. Make the sidebar retractable to provide more Board space.
-11. Include login and registration routes in demo mode.
+8. Add first-administrator setup and invited-user activation screens.
+9. Make the sidebar retractable to provide more Board space.
 
 ## Work Completed
 
 ### Architecture
 
 * Replaced the monolithic navigation with React Router route composition.
-* Added TanStack Query for API state, cache invalidation, and mock mutations.
+* Added TanStack Query for API state and cache invalidation.
 * Added Tailwind CSS v4 and shadcn-compatible semantic tokens.
 * Added `cn()` and reusable UI/app components.
 * Removed obsolete role dashboard modules and their dashboard-only components.
-
-### Demo Environment
-
-* Added a typed local Axios adapter and fixture database.
-* Added projects, members, sprints, backlog cards, Board cards, comments,
-  checklist items, Planning Poker votes, and administrative mutations.
-* Persisted demo role and data in browser local storage.
-* Added a reset action for restoring fixture data.
-* Kept demo mode limited to development builds.
 
 ### Navigation and Project Scope
 
@@ -60,7 +48,6 @@ prototype behavior.
   QA waiting state, Planning Poker, unread comments, assignee, and estimate.
 * Added a larger task creation dialog with task/bug-specific fields.
 * Added card detail presentation with comments and subtasks/checklists tabs.
-* Added private Planning Poker submission behavior in the demo adapter.
 * Added mark-as-seen behavior when opening a card.
 
 ### Authentication
@@ -70,7 +57,7 @@ prototype behavior.
 * Added first-administrator setup and invited-user activation screens.
 * Initially added `VITE_FIRST_BOOT` as a temporary frontend development switch;
   it was later replaced by the backend bootstrap-status endpoint.
-* Kept Google OAuth and real email delivery outside demo mode.
+* Kept Google OAuth and real email delivery tied to real backend flows.
 
 ## Verification Performed
 
@@ -121,6 +108,29 @@ All three quality commands passed at the end of this implementation pass.
   inactive-account disclosure, and email-MFA behavior.
 * Added `wipe_db_state0` for restoring a disposable local PostgreSQL database to
   first boot without recreating the container or schema.
+
+## Sprint 2 Card Flow Stabilization - 2026-06-21
+
+* Added backend support for moving a backlog card into an active sprint through
+  `PATCH /api/cards/<id>/` with `sprint_id`, placing it in `To do`.
+* Restricted card edit `PATCH` to admin or project `GERENTE`, matching the
+  documented usage flow.
+* Added backlog actions to move cards to the active sprint or remove them.
+* Added `dnd-kit` drag-and-drop movement in the Board as the only frontend
+  column movement control.
+* Adjusted movement permissions so assigned users can move their own cards and
+  any member can assume an unassigned card.
+* Converted card edit save to a React Query mutation with visible API errors,
+  so failed saves no longer look like an inert button.
+* Added a narrow optimistic cache update for Board column movement and kept
+  normal invalidation/refetch for broader card edits.
+* Added a centered Board wrapper with responsive column widths so the board
+  fills available space without making cards too wide.
+* Removed column editing from the card detail modal to avoid duplicated movement
+  paths.
+* Added acceptance criteria to the card edit form.
+* Added a migration allowing deadline history rows to represent setting or
+  clearing an optional deadline.
 
 ## Known Visual Differences
 

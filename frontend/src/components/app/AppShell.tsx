@@ -31,7 +31,7 @@ export function AppShell({ children, user, onMfaSettings, onLogout, navItems = d
   const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <div className={cn('min-h-screen bg-background md:grid md:grid-rows-[4rem_1fr]', collapsed ? 'md:grid-cols-[4.5rem_1fr]' : 'md:grid-cols-[16rem_1fr]')}>
+    <div className={cn('h-screen overflow-hidden bg-background md:grid md:grid-rows-[4rem_1fr]', collapsed ? 'md:grid-cols-[4rem_1fr]' : 'md:grid-cols-[16rem_1fr]')}>
       <aside className="row-span-2 hidden border-r border-border bg-sidebar transition-[width] md:flex md:flex-col">
         <div className={cn('flex h-16 items-center border-b border-border', collapsed ? 'justify-center px-2' : 'justify-between px-5')}>
           <BrandMark compact={collapsed} />
@@ -89,7 +89,7 @@ export function AppShell({ children, user, onMfaSettings, onLogout, navItems = d
         </div>
       </header>
 
-      <div className="min-w-0 overflow-auto">{children}</div>
+      <div className="min-h-0 min-w-0 overflow-hidden">{children}</div>
     </div>
   )
 }
