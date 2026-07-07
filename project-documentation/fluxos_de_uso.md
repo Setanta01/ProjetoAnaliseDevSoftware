@@ -9,22 +9,26 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos da 
 ## 1. Fluxo de Convite, Autenticação e Segurança
 
 ### Cenário 0: Primeiro Boot da Instalação
+
 1. Enquanto não existir nenhuma conta, o frontend consulta `GET /api/auth/bootstrap-status/` e exibe uma rota pública e temporária para criação da primeira conta administrativa.
 2. A criação chama `POST /api/auth/bootstrap-admin/`, inicializa o sistema de contas e encerra permanentemente o estado de primeiro boot.
 3. Depois disso, não existe cadastro público livre: novos usuários entram apenas por convite enviado por um administrador.
 4. A disponibilidade é decidida exclusivamente pelo backend; configuração do cliente não pode reabrir o cadastro inicial.
 
 ### Cenário 1: Entrada no Sistema
+
 1. O **Administrador** acessa o painel de usuários e envia um convite (`POST /api/admin/convites/`) inserindo o e-mail de um novo colaborador.
 2. O colaborador recebe um e-mail com um token único, entregue pelo worker SMTP. Ao acessar o link, ele define sua senha (`POST /api/auth/ativar-convite/`). O sistema cria o registro na tabela `usuarios` e invalida o convite.
 3. Se o administrador tiver marcado a flag `admin=true` no convite, esse usuário terá privilégios globais em toda a aplicação.
 
 ### Cenário 2: Login com MFA (Multi-Factor Authentication)
+
 1. O usuário tenta fazer login com as credenciais cadastradas (`POST /api/auth/login/`).
 2. O backend valida a senha, mas, se o `mfa_ativo` estiver `true`, não devolve o JWT final imediatamente. Retorna um `mfa_token` (válido por 5 minutos) e o aviso `mfa_required: true`.
 3. O usuário insere o código (TOTP ou OTP de e-mail) e chama o endpoint de desafio (`POST /api/auth/mfa/challenge/`). Somente então recebe o par de tokens JWT (`access` e `refresh`) para navegação.
 
 ### Cenário 3: Entrada e Navegação Principal
+
 1. Após autenticar, qualquer usuário entra em **Meus Projetos**, que lista somente os projetos dos quais é membro.
 2. O administrador possui também uma página global separada, **Projetos Admin**, para administrar todos os projetos, inclusive arquivamento ou exclusão. Essa página não substitui **Meus Projetos**.
 3. Board, Backlog, membros e histórico de sprints são navegação contextual e só aparecem depois que o usuário seleciona um projeto.
@@ -46,19 +50,23 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos da 
 ## 3. Fluxo de Planejamento (Sprints e Poker)
 
 ### Construção do Backlog
+
 1. O **Gerente** cria as tarefas ou bugs iniciais no Backlog daquele projeto (`POST /api/projetos/<id>/cards/`). Nesta etapa entram apenas dados ainda independentes da sprint, como título, descrição, tipo e critérios de aceitação. Campos de execução como prioridade, responsável, deadline, checklists, comentarios, anexos e validação ficam para quando o card entrar em uma sprint.
 
 ### Preparação da Sprint
+
 1. O **Gerente** abre uma sprint para o projeto (`POST /api/projetos/<id>/sprints/`). A interface não expõe mais uma tela separada de sprint planejada; o foco operacional fica na sprint ativa e no historico das encerradas.
 2. O Gerente move cards do Backlog para dentro da Sprint. Ao fazer isso, o sistema abre o formulário do card com os dados já preenchidos e permite revisar informações específicas da sprint, como prioridade, titulo, descricao, criterios de aceitacao, responsavel, deadline e dificuldade/Planning Poker. O card entra sempre na coluna `To do`.
 
 ### Estimativa com Planning Poker
+
 1. O time precisa estimar os pontos de esforço para uma tarefa. O Gerente aciona no card a opção `pronto_para_estimativa = true`.
 2. Os membros do projeto (DEVs e QAs) enviam via formulário privado (`POST /api/cards/<id>/estimativas/`) as suas notas de Planning Poker usando a escala `1`, `2`, `3`, `5`, `8`, `13`, `21` ou `?`. **Os votos não ficam expostos à equipe até o encerramento do Poker.** Cada um só vê o seu próprio voto.
 3. Caso mudem de ideia na calada do planejamento, um novo POST atualiza/sobrescreve a pontuação.
 4. O Gerente (moderador do Poker) vê quem já votou, sem ver os valores privados, e pode acionar o fechamento da estimativa (`POST /api/cards/<id>/estimativas/revelar/`) mesmo se nem todos votaram. Todos os votos de `estimativas` mudam a propriedade de estado interno para `revelada = true`. O time agora visualiza os resultados no Card e o Gerente preenche o resultado consensual em `estimativa_consolidada`.
 
 ### Iniciando a Sprint
+
 1. O Gerente inicia a Sprint (`POST /api/sprints/<id>/iniciar/`). A `data_inicio` do Banco passa a ser o instante em que esta chamada foi processada, e o `status` vai para `ATIVA`. A restrição sistêmica obriga a existir, no máximo, **1 ativa** por vez.
 
 ---
@@ -68,16 +76,20 @@ Este documento detalha as principais jornadas de uso e os fluxos sistêmicos da 
 > **Atualização de Interface:** O frontend usa invalidacao de cache e refetch seletivo para manter o board e as telas compartilhadas consistentes. Os detalhes de intervalo e politica de refresh ficam documentados em `detalhes-de-implementacao.md`.
 
 ### Executando Tarefas e Mutabilidade
+
 1. O **Dev** arrasta o card para a coluna de andamento e a interface dispara em backgroud a alteração de status/coluna (`PATCH /api/cards/<id>/`). A alteração do responsavel pelo Card insere um log na timeline natural (`card_historico`).
 2. O Dev preenche ou dá "check" em itens da sua lista de `checklists` dentro do card. Cada alteração dispara uma atualização isolada (`PATCH` em `/itens/<id>/`), permitindo acompanhamento simultâneo do time.
 3. Para comunicação focada na tarefa, o Dev cria um novo comentário no card. Esta ação atualiza a data de ultima modificacao do card, dispara notificacoes por e-mail aos envolvidos (como os marcados ou o responsavel pela tarefa), e sinaliza aos outros membros uma novidade a ser lida.
 
 ### Gestão de Exceções de Prazo e Impedimentos
+
 1. Quando uma entrega exige renegociação e uma nova data de vencimento (`due_date`) é proposta, a API intercepta a request e exige que no Payload haja obrigatoriamente a explicação `justificativa_prazo`. Sem o comentário, a modificação falha. O relato será gravado e anexado ao log da alteração.
-2. Caso o Dev fique "blockado" por questões externas, ele aciona o modo de bloqueio (`POST /api/cards/<id>/impedimento/`), provendo o relato do porquê o Card travou. O card recebe uma sinalizacao visual de bloqueio e o detalhe do card exibe a justificativa enquanto o impedimento estiver ativo.
+2. Caso o Dev fique bloqueado por questões externas, ele aciona o modo de bloqueio (`POST /api/cards/<id>/impedimento/`), provendo o relato do porquê o Card travou. O card recebe uma sinalizacao visual de bloqueio e o detalhe do card exibe a justificativa enquanto o impedimento estiver ativo.
 
 ### Indicadores Visuais (Stamps/Flags)
+
 No front-end, a visualização condensada (a face do card na coluna, antes de abrir os detalhes) possui stamps que traduzem campos lógicos em contexto visual útil, incluindo:
+
 1. **Prioridade:** Indicadores com cores ou ícones mostrando prioridade Baixa, Média, Alta ou Urgente.
 2. **Prazos:** Alertas dinâmicos baseados no `due_date`, exibindo selos visuais como "Atrasado" (vermelho) ou "Entrega em 24h" (laranja).
 3. **Impedimentos:** Se marcado como impedido (`impedido = true`), o card exibe um ícone forte (ex: uma placa de pare ou coloração de destaque "Bloqueado"), sinalizando travamento ao Scrum Master/Gerente.
@@ -85,6 +97,7 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 5. **Flags de Novidade:** Se `tem_novidade` for gerada pelo endpoint para esse usuário específico, o card mostrará uma insígnia sutil de "Novo Comentário/Alteração".
 
 ### Visualização Contextual e Badges
+
 1. Para manter a contextualização da falta de sininho, o Payload do `GET /sprints/<id>/` avalia internamente a diferença de _timestamps_ entre a última interação do usuário (`last_viewed_at` virtualizada ou no card) e atualiza o JSON de entrega injetando flag booleana `tem_novidade: true`.
 2. Ao clicar visualmente em cima do Card, o Frontend despacha imediatamente uma chamada a `POST /api/cards/<id>/marcar-visto/`.
 3. No banco, os registros em `notificacoes` referentes àquele evento para o ID em uso mudam seu status para `lida = true` eliminando a flag da UI no instante da leitura.
@@ -108,7 +121,7 @@ No front-end, a visualização condensada (a face do card na coluna, antes de ab
 2. O **Gerente** efetiva a conclusao (`POST /api/sprints/<id>/encerrar/`).
 3. Imediatamente a API sela de maneira estatica a coluna de data e hora de fim (`data_fim`) e grava snapshot dos cards da sprint encerrada.
 4. O payload escolhe `acao: "iniciar_planejada"` ou `acao: "pausar"`.
-   - Em `iniciar_planejada`, o sistema inicia a proxima sprint cadastrada e move os cards pendentes informados em `cards_para_sprint`. Cards que estavam em `Review` permanecem em `Review`; os demais retornam para `To do`.
-   - Em `pausar`, a sprint atual e encerrada sem iniciar uma nova imediatamente. Quando o projeto for retomado, uma nova sprint pode ser criada e iniciada sem perder o snapshot da sprint anterior.
-   - `cards_para_backlog` contem cards que devem voltar ao estado frio do `Backlog`.
+    - Em `iniciar_planejada`, o sistema inicia a proxima sprint cadastrada e move os cards pendentes informados em `cards_para_sprint`. Cards que estavam em `Review` permanecem em `Review`; os demais retornam para `To do`.
+    - Em `pausar`, a sprint atual e encerrada sem iniciar uma nova imediatamente. Quando o projeto for retomado, uma nova sprint pode ser criada e iniciada sem perder o snapshot da sprint anterior.
+    - `cards_para_backlog` contem cards que devem voltar ao estado frio do `Backlog`.
 5. O historico de sprints deve permitir abrir sprints antigas e ver o estado congelado no encerramento, sem depender dos cards atuais do projeto.
