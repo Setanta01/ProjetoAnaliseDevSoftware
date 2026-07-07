@@ -76,6 +76,58 @@ Configure a URL do backend:
 VITE_API_URL=http://localhost:8000
 ```
 
+### Setup no Windows (PowerShell)
+
+Os mesmos passos funcionam no Windows usando PowerShell. Use Docker Desktop ou
+Podman Desktop para o PostgreSQL.
+
+Crie o PostgreSQL local:
+
+```powershell
+podman run -d `
+  --name lazuli-postgres `
+  --restart unless-stopped `
+  -e POSTGRES_DB=lazuli `
+  -e POSTGRES_USER=lazuli `
+  -e POSTGRES_PASSWORD="<senha-local>" `
+  -p 5432:5432 `
+  -v lazuli-postgres-data:/var/lib/postgresql/data `
+  docker.io/library/postgres:16-alpine
+```
+
+Se estiver usando Docker em vez de Podman, troque `podman` por `docker`.
+
+Importe o schema da aplicação:
+
+```powershell
+Get-Content backend/api/migrations/sql/initial_schema.sql | podman exec -i lazuli-postgres psql -v ON_ERROR_STOP=1 -U lazuli -d lazuli
+```
+
+Configure o backend:
+
+```powershell
+cd backend
+py -3.13 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+Copy-Item .env.example .env
+python manage.py migrate
+```
+
+Se o PowerShell bloquear a ativação do ambiente virtual, execute uma vez:
+
+```powershell
+Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+```
+
+Configure o frontend:
+
+```powershell
+cd ..\frontend
+npm install
+Copy-Item .env.example .env.local
+```
+
 ## Executar o projeto
 
 Terminal 1, PostgreSQL:
@@ -110,6 +162,13 @@ python manage.py process_email_queue
 O worker só é necessário para convites, recuperação de senha, MFA por e-mail e
 outras notificações. Para processar apenas o lote disponível e encerrar, use
 `python manage.py process_email_queue --once`.
+
+No Windows, os comandos de execução são os mesmos, trocando a ativação do
+ambiente virtual por:
+
+```powershell
+.\.venv\Scripts\Activate.ps1
+```
 
 ## Primeiro acesso
 
@@ -164,6 +223,9 @@ source .venv/bin/activate
 python manage.py test api.tests
 python manage.py check
 ```
+
+No Windows, substitua `source .venv/bin/activate` por
+`.\.venv\Scripts\Activate.ps1`.
 
 Frontend:
 
