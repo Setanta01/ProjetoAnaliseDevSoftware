@@ -9,6 +9,7 @@ import { PriorityBadge } from '@/components/app/TaskBadges'
 import { ViewToggle, type ViewMode } from '@/components/app/ViewToggle'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { Select } from '@/components/ui/select'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { getSprintDeadlineState } from '@/lib/card-rules'
 import type { ProjectRole, SprintDetail, Task } from '@/types'
@@ -86,11 +87,19 @@ export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard
 
   const moveCard = (taskId: number, columnId: number) => {
     const task = tasks.find((item) => item.id === taskId)
-    if (!canMoveTask(task)) return
+    if (!canMoveTask(task, columnId)) return
     moveCardMutation.mutate({ taskId, columnId })
   }
 
-  const canMoveTask = (task?: Task) => Boolean(task && (canManage || task.responsavel_id === currentUserId))
+  const canMoveTask = (task?: Task, targetColumnId?: number) => {
+    if (!task) return false
+    if (canManage || task.responsavel_id === currentUserId) return true
+    const qaApprovedReview = currentRole === 'QA' && task.status === 'REVISAO' && task.ultima_validacao_resultado === 'APROVADO'
+    if (!qaApprovedReview) return false
+    if (!targetColumnId) return true
+    const targetColumn = columns.find((column) => column.id === targetColumnId)
+    return Boolean(targetColumn?.e_final || targetColumn?.nome === 'Done')
+  }
 
   const setViewMode = (nextMode: ViewMode) => {
     localStorage.setItem(VIEW_MODE_STORAGE_KEY, nextMode)
@@ -136,14 +145,14 @@ export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard
           </DndContext>
         ) : (
           <div className="mb-6 flex-1 overflow-auto rounded-lg border border-border bg-card">
-            <Table className="min-w-[980px] table-fixed">
+            <Table className="min-w-[1040px] table-fixed">
               <colgroup>
                 <col className="w-28" />
                 <col />
                 <col className="w-28" />
                 <col className="w-24" />
                 <col className="w-32" />
-                <col className="w-32" />
+                <col className="w-44" />
                 <col className="w-20" />
               </colgroup>
               <TableHeader>
@@ -182,7 +191,30 @@ export default function BoardView({ sprintId, projectName, onOpenCard, onNewCard
                       </TableCell>
                       <TableCell><Badge variant={task.tipo === 'BUG' ? 'danger' : 'neutral'}>{task.tipo === 'BUG' ? 'Bug' : 'Task'}</Badge></TableCell>
                       <TableCell><PriorityBadge prioridade={task.prioridade} /></TableCell>
-                      <TableCell className="truncate whitespace-nowrap" title={columnName}>{columnName}</TableCell>
+                      <TableCell>
+                        {canMoveTask(task) ? (
+                          <div onClick={(event) => event.stopPropagation()}>
+                            <Select
+                              className="h-8"
+                              value={String(task.coluna_id ?? '')}
+                              onChange={(event) => moveCard(task.id, Number(event.target.value))}
+                              aria-label={`Mover ${task.codigo ?? `#${task.id}`} para outra coluna`}
+                            >
+                              {columns.map((column) => (
+                                <option
+                                  key={column.id}
+                                  value={column.id}
+                                  disabled={column.id !== task.coluna_id && !canMoveTask(task, column.id)}
+                                >
+                                  {column.nome}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                        ) : (
+                          <span className="truncate whitespace-nowrap" title={columnName}>{columnName}</span>
+                        )}
+                      </TableCell>
                       <TableCell className="text-center font-semibold">{task.estimativa_consolidada ?? '-'}</TableCell>
                     </TableRow>
                   )

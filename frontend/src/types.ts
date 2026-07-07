@@ -60,10 +60,12 @@ export interface Task {
   due_date?: string;
   estimativa_consolidada?: number;
   impedido?: boolean;
+  impedimento_motivo?: string | null;
   pronto_para_estimativa?: boolean;
   tem_novidade?: boolean;
   novos_comentarios?: boolean;
   aguardando_qa?: boolean;
+  ultima_validacao_resultado?: ValidacaoQA["resultado"];
   passos_reproducao?: string;
   resultado_esperado?: string;
   card_origem_id?: number | null;

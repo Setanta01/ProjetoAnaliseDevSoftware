@@ -38,7 +38,6 @@ committed. A flow is not complete merely because its screen or endpoint exists.
   `Kanban.tsx` from feature commits.
 - [x] Resolve the uncommitted root `.env.example` sender-domain discrepancy
   without exposing credentials.
-- [x] Continue leaving every `contexto_completo` file untouched and uncommitted.
 - [x] Define one Portuguese commit per feature pack so history remains semantic:
   email queue, SMTP worker/templates, route stabilization, invitation flow,
   password recovery, and auth verification.

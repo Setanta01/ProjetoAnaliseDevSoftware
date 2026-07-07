@@ -31,6 +31,11 @@ Desacoplada do servidor, a _View_ é uma Single Page Application (SPA) desenvolv
 #### Comunicação e Padrão de API:
 A comunicação entre o cliente e o servidor ocorre exclusivamente através de uma **API RESTful** baseada em JSON, provida pelo Django REST Framework. A API utiliza métodos HTTP semânticos (GET, POST, PUT, PATCH, DELETE) e responde com códigos de status padronizados. O consumo de dados sensíveis e rotas protegidas exige a injeção do token JWT local no cabeçalho `Authorization: Bearer <token>`.
 
+As transições do board seguem um workflow fixo de projeto e são validadas no
+backend. A interface pode antecipar permissoes para melhorar a experiencia, mas
+regras como devolucao/aprovacao de QA, impedimentos e movimentacao entre
+colunas continuam centralizadas na API.
+
 #### Gestão de Identidade e Acessos:
 A **Autenticação** e a emissão de tokens JWT são gerenciadas nativamente pelo backend utilizando o **Django REST Framework (DRF)** com a biblioteca *Simple JWT*. A aplicação possui implementação própria para autenticação de dois fatores (MFA - via e-mail e TOTP) e Single Sign-On (SSO) com o Google OAuth. O fluxo de segurança utiliza um *Token de Desafio (MFA Token)* de curta duração antes da emissão do JWT final de sessão. A **Autorização** contextual define as permissões específicas do usuário dependendo do projeto que ele acessa, sendo estruturada através do sistema de Grupos e Permissões do Django em conjunto com tabelas associativas (como de “membro de um projeto”).
 

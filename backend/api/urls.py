@@ -289,16 +289,13 @@ urlpatterns = [
     # ──────────────────────────────────────────────────────────────────────────
 
     # POST /cards/<id>/anexos/     → upload direto no card
-    #   ✗  criar view card_anexos
     path('cards/<int:card_id>/anexos/',     views.card_anexos,              name='card_anexos'),
 
     # POST /cards/comentarios/<id>/anexos/ → upload num comentário específico
-    #   ✗  criar view comentario_anexos
     path('cards/comentarios/<int:comentario_id>/anexos/',
          views.comentario_anexos,                                           name='comentario_anexos'),
 
     # DELETE /cards/anexos/<id>/   → remove anexo
-    #   ✗  criar view anexo_detail
     path('cards/anexos/<int:anexo_id>/',    views.anexo_detail,             name='anexo_detail'),
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -307,7 +304,6 @@ urlpatterns = [
 
     # GET  /cards/<id>/validacao/  → histórico de validações
     # POST /cards/<id>/validacao/  → QA registra APROVADO ou REPROVADO
-    #   ✗  criar view card_validacao
     path('cards/<int:card_id>/validacao/',  views.card_validacao,           name='card_validacao'),
 
     # ──────────────────────────────────────────────────────────────────────────
@@ -316,20 +312,6 @@ urlpatterns = [
 
     # POST   /cards/<id>/impedimento/ → marca impedido=True (exige comentario)
     # DELETE /cards/<id>/impedimento/ → remove impedimento
-    #   ✗  criar view card_impedimento
     path('cards/<int:card_id>/impedimento/',
          views.card_impedimento,                                            name='card_impedimento'),
-
-
-    # ──────────────────────────────────────────────────────────────────────────
-    # ROTAS DO PROTÓTIPO (mantidas temporariamente para não quebrar o frontend)
-    # Remova este bloco assim que o frontend estiver usando as novas rotas.
-    # ──────────────────────────────────────────────────────────────────────────
-
-    # path('register/',         views.register,         name='register'),       # → /auth/ativar-convite/
-    # path('profile/',          views.profile,          name='profile'),        # → /auth/profile/
-    # path('sprints/',          views.sprints_list,     name='sprints_list'),   # → /projetos/<id>/sprints/
-    # path('tasks/',            views.tasks_list,       name='tasks_list'),     # → /projetos/<id>/cards/
-    # path('tasks/minhas/',     views.tasks_minhas,     name='tasks_minhas'),   # → /cards/?responsavel=me
-    # path('tasks/<int:pk>/',   views.task_detail,      name='task_detail'),    # → /cards/<id>/
 ]
